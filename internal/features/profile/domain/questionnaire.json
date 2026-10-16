@@ -1,0 +1,747 @@
+{
+ "version": "4.0",
+ "sections": [
+  {
+   "id": "section_1",
+   "nameEn": "About You",
+   "nameId": "Tentang Anda",
+   "icon": "user",
+   "questions": [
+    {
+     "id": "q1",
+     "type": "single_choice",
+     "required": true,
+     "textEn": "What is your age?",
+     "textId": "Berapa usia Anda?",
+     "options": [
+      {
+       "id": "18_24",
+       "labelEn": "18–24",
+       "labelId": "18–24"
+      },
+      {
+       "id": "25_30",
+       "labelEn": "25–30",
+       "labelId": "25–30"
+      },
+      {
+       "id": "31_40",
+       "labelEn": "31–40",
+       "labelId": "31–40"
+      },
+      {
+       "id": "41_50",
+       "labelEn": "41–50",
+       "labelId": "41–50"
+      },
+      {
+       "id": "51_60",
+       "labelEn": "51–60",
+       "labelId": "51–60"
+      },
+      {
+       "id": "60_plus",
+       "labelEn": "60+",
+       "labelId": "60+"
+      }
+     ]
+    },
+    {
+     "id": "q5",
+     "type": "single_choice",
+     "required": true,
+     "textEn": "How many dependents do you have?",
+     "textId": "Berapa jumlah tanggungan Anda?",
+     "options": [
+      {
+       "id": "0",
+       "labelEn": "0",
+       "labelId": "0"
+      },
+      {
+       "id": "1",
+       "labelEn": "1",
+       "labelId": "1"
+      },
+      {
+       "id": "2",
+       "labelEn": "2",
+       "labelId": "2"
+      },
+      {
+       "id": "3",
+       "labelEn": "3",
+       "labelId": "3"
+      },
+      {
+       "id": "4_plus",
+       "labelEn": "4+",
+       "labelId": "4+"
+      }
+     ]
+    },
+    {
+     "id": "q10",
+     "type": "single_choice",
+     "required": true,
+     "textEn": "What is your current employment status?",
+     "textId": "Apa status pekerjaan Anda saat ini?",
+     "options": [
+      {
+       "id": "permanent_employee",
+       "labelEn": "Permanent employee",
+       "labelId": "Karyawan tetap"
+      },
+      {
+       "id": "contract_employee",
+       "labelEn": "Contract employee",
+       "labelId": "Karyawan kontrak"
+      },
+      {
+       "id": "freelancer",
+       "labelEn": "Freelancer",
+       "labelId": "Freelancer"
+      },
+      {
+       "id": "business_owner",
+       "labelEn": "Business owner / UMKM",
+       "labelId": "Wiraswasta / UMKM"
+      },
+      {
+       "id": "student",
+       "labelEn": "Student / not working",
+       "labelId": "Mahasiswa / belum bekerja"
+      },
+      {
+       "id": "housewife",
+       "labelEn": "Housewife / household manager",
+       "labelId": "Ibu rumah tangga"
+      },
+      {
+       "id": "retired",
+       "labelEn": "Retired / pensioner",
+       "labelId": "Pensiunan"
+      }
+     ]
+    },
+    {
+     "id": "q11",
+     "type": "single_choice",
+     "required": true,
+     "textEn": "How stable is your monthly income?",
+     "textId": "Seberapa stabil pendapatan bulanan Anda?",
+     "options": [
+      {
+       "id": "very_stable",
+       "labelEn": "Very stable (same amount every month)",
+       "labelId": "Sangat stabil (jumlah sama setiap bulan)"
+      },
+      {
+       "id": "somewhat_stable",
+       "labelEn": "Somewhat stable (varies but predictable)",
+       "labelId": "Cukup stabil (bervariasi tapi bisa diprediksi)"
+      },
+      {
+       "id": "unstable",
+       "labelEn": "Unstable (significant up and down)",
+       "labelId": "Tidak stabil (naik-turun signifikan)"
+      },
+      {
+       "id": "no_fixed_income",
+       "labelEn": "No fixed income",
+       "labelId": "Tidak ada pendapatan tetap"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "section_2",
+   "nameEn": "Your Money",
+   "nameId": "Keuangan Anda",
+   "icon": "wallet",
+   "questions": [
+    {
+     "id": "q2",
+     "type": "numeric",
+     "required": true,
+     "textEn": "What is your monthly income? (IDR)",
+     "textId": "Berapa pendapatan bulanan Anda? (Rupiah)",
+     "unit": "IDR/month",
+     "min": 0,
+     "max": 1000000000,
+     "optOutAllowed": true,
+     "hintEn": "You can type 15m, 15 million or 15.000.000.",
+     "hintId": "Anda bisa mengetik 15jt, 15 juta atau 15.000.000."
+    },
+    {
+     "id": "q3",
+     "type": "numeric",
+     "required": true,
+     "textEn": "What are your average monthly expenses? (IDR)",
+     "textId": "Berapa pengeluaran bulanan rata-rata Anda? (Rupiah)",
+     "unit": "IDR/month",
+     "min": 0,
+     "max": 1000000000,
+     "hintEn": "You can type 15m, 15 million or 15.000.000.",
+     "hintId": "Anda bisa mengetik 15jt, 15 juta atau 15.000.000."
+    },
+    {
+     "id": "q4",
+     "type": "numeric",
+     "required": true,
+     "textEn": "How much liquid savings do you currently have? (IDR)",
+     "textId": "Berapa tabungan likuid yang Anda miliki saat ini? (Rupiah)",
+     "unit": "IDR",
+     "min": 0,
+     "max": 100000000000,
+     "hintEn": "You can type 15m, 15 million or 15.000.000.",
+     "hintId": "Anda bisa mengetik 15jt, 15 juta atau 15.000.000."
+    },
+    {
+     "id": "q6",
+     "type": "multi_select",
+     "required": true,
+     "textEn": "Which of these debts do you currently have?",
+     "textId": "Utang mana yang sedang Anda miliki?",
+     "exclusiveOption": "none",
+     "options": [
+      {
+       "id": "credit_card",
+       "labelEn": "Credit card (outstanding)",
+       "labelId": "Kartu kredit (belum lunas)"
+      },
+      {
+       "id": "paylater",
+       "labelEn": "Paylater / BNPL",
+       "labelId": "Paylater / PayLater"
+      },
+      {
+       "id": "pinjol",
+       "labelEn": "Online loan (pinjol)",
+       "labelId": "Pinjaman online (pinjol)"
+      },
+      {
+       "id": "kta",
+       "labelEn": "Bank personal loan (KTA)",
+       "labelId": "Kredit tanpa agunan (KTA)"
+      },
+      {
+       "id": "mortgage",
+       "labelEn": "Mortgage / home loan",
+       "labelId": "KPR / kredit rumah"
+      },
+      {
+       "id": "vehicle",
+       "labelEn": "Vehicle loan",
+       "labelId": "Kredit kendaraan"
+      },
+      {
+       "id": "none",
+       "labelEn": "None",
+       "labelId": "Tidak ada"
+      }
+     ],
+     "followup": {
+      "id": "q6_installment",
+      "textEn": "What is the total monthly installment for these debts? (IDR)",
+      "textId": "Berapa total cicilan bulanan untuk utang tersebut? (Rupiah)",
+      "unit": "IDR/month",
+      "min": 0,
+      "max": 1000000000,
+      "showWhen": {
+       "qid": "q6",
+       "notIn": [
+        "none"
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "section_3",
+   "nameEn": "Your Investments",
+   "nameId": "Investasi Anda",
+   "icon": "chart",
+   "questions": [
+    {
+     "id": "q7",
+     "type": "numeric",
+     "required": true,
+     "textEn": "What is your total investment asset value? (IDR)",
+     "textId": "Berapa total nilai aset investasi Anda? (Rupiah)",
+     "unit": "IDR",
+     "min": 0,
+     "max": 1000000000000,
+     "optOutAllowed": true,
+     "hintEn": "You can type 15m, 15 million or 15.000.000.",
+     "hintId": "Anda bisa mengetik 15jt, 15 juta atau 15.000.000."
+    },
+    {
+     "id": "q8",
+     "type": "numeric",
+     "required": true,
+     "textEn": "How much can you invest monthly? (IDR)",
+     "textId": "Berapa yang bisa Anda investasikan per bulan? (Rupiah)",
+     "unit": "IDR/month",
+     "min": 0,
+     "max": 1000000000,
+     "hintEn": "Cannot exceed income minus expenses minus debt installments.",
+     "hintId": "Tidak boleh melebihi pendapatan dikurangi pengeluaran dan cicilan."
+    },
+    {
+     "id": "q9",
+     "type": "single_choice",
+     "required": true,
+     "textEn": "What is your investment time horizon for your current investments?",
+     "textId": "Berapa horizon investasi untuk investasi Anda saat ini?",
+     "options": [
+      {
+       "id": "none",
+       "labelEn": "Not investing / no plans yet",
+       "labelId": "Tidak invest / belum berencana"
+      },
+      {
+       "id": "lt_1",
+       "labelEn": "< 1 year",
+       "labelId": "< 1 tahun"
+      },
+      {
+       "id": "1_3",
+       "labelEn": "1–3 years",
+       "labelId": "1–3 tahun"
+      },
+      {
+       "id": "3_5",
+       "labelEn": "3–5 years",
+       "labelId": "3–5 tahun"
+      },
+      {
+       "id": "5_10",
+       "labelEn": "5–10 years",
+       "labelId": "5–10 tahun"
+      },
+      {
+       "id": "gt_10",
+       "labelEn": "> 10 years",
+       "labelId": "> 10 tahun"
+      }
+     ]
+    },
+    {
+     "id": "q23",
+     "type": "multi_select",
+     "required": true,
+     "textEn": "Do you currently hold any investment assets? Select all that apply.",
+     "textId": "Apakah Anda saat ini memiliki aset investasi? Pilih semua yang sesuai.",
+     "exclusiveOption": "none",
+     "options": [
+      {
+       "id": "stocks",
+       "labelEn": "Stocks",
+       "labelId": "Saham"
+      },
+      {
+       "id": "mutual_funds",
+       "labelEn": "Mutual funds",
+       "labelId": "Reksa dana"
+      },
+      {
+       "id": "bonds_sbn",
+       "labelEn": "Bonds / SBN",
+       "labelId": "Obligasi / SBN"
+      },
+      {
+       "id": "gold",
+       "labelEn": "Gold",
+       "labelId": "Emas"
+      },
+      {
+       "id": "deposits",
+       "labelEn": "Time deposits",
+       "labelId": "Deposito"
+      },
+      {
+       "id": "crypto",
+       "labelEn": "Crypto",
+       "labelId": "Kripto"
+      },
+      {
+       "id": "property",
+       "labelEn": "Property",
+       "labelId": "Properti"
+      },
+      {
+       "id": "none",
+       "labelEn": "None",
+       "labelId": "Tidak ada"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "section_4",
+   "nameEn": "Your Risk Preference",
+   "nameId": "Preferensi Risiko Anda",
+   "icon": "shield",
+   "disclaimerEn": "Adapted from the Grable-Lytton Risk-Tolerance Scale. This is not a validated psychometric instrument; it is a simplified version for product purposes.",
+   "disclaimerId": "Diadaptasi dari Grable-Lytton Risk-Tolerance Scale. Ini bukan instrumen psikometrik tervalidasi; ini versi sederhana untuk keperluan produk.",
+   "questions": [
+    {
+     "id": "q12",
+     "type": "single_choice",
+     "required": true,
+     "textEn": "If your investment dropped 20% in one month, what would you do?",
+     "textId": "Jika investasi Anda turun 20% dalam sebulan, apa yang akan Anda lakukan?",
+     "options": [
+      {
+       "id": "sell_all",
+       "labelEn": "Sell everything",
+       "labelId": "Jual semua"
+      },
+      {
+       "id": "sell_some",
+       "labelEn": "Sell some to cut losses",
+       "labelId": "Jual sebagian untuk batasi kerugian"
+      },
+      {
+       "id": "hold",
+       "labelEn": "Hold and wait",
+       "labelId": "Tahan dan tunggu"
+      },
+      {
+       "id": "buy_more",
+       "labelEn": "Buy more at a lower price",
+       "labelId": "Beli lebih banyak di harga murah"
+      }
+     ]
+    },
+    {
+     "id": "q13",
+     "type": "single_choice",
+     "required": true,
+     "textEn": "Which statement best describes your investment preference?",
+     "textId": "Pernyataan mana yang paling menggambarkan preferensi investasi Anda?",
+     "options": [
+      {
+       "id": "protect",
+       "labelEn": "I prioritize protecting my capital above all",
+       "labelId": "Saya prioritaskan menjaga modal di atas segalanya"
+      },
+      {
+       "id": "balance",
+       "labelEn": "I want balance between growth and safety",
+       "labelId": "Saya ingin keseimbangan antara pertumbuhan dan keamanan"
+      },
+      {
+       "id": "growth",
+       "labelEn": "I prioritize growth and accept higher risk",
+       "labelId": "Saya prioritaskan pertumbuhan dan terima risiko lebih tinggi"
+      },
+      {
+       "id": "max_growth",
+       "labelEn": "I want maximum growth and can tolerate high volatility",
+       "labelId": "Saya ingin pertumbuhan maksimal dan tahan volatilitas tinggi"
+      }
+     ]
+    },
+    {
+     "id": "q14",
+     "type": "single_choice",
+     "required": true,
+     "textEn": "How would your best friend describe you as a risk taker?",
+     "textId": "Bagaimana teman terdekat Anda menggambarkan Anda sebagai pengambil risiko?",
+     "options": [
+      {
+       "id": "avoider",
+       "labelEn": "A real risk avoider",
+       "labelId": "Sangat menghindari risiko"
+      },
+      {
+       "id": "cautious",
+       "labelEn": "Cautious",
+       "labelId": "Berhati-hati"
+      },
+      {
+       "id": "willing_after_research",
+       "labelEn": "Willing to take risks after adequate research",
+       "labelId": "Bersedia ambil risiko setelah riset cukup"
+      },
+      {
+       "id": "gambler",
+       "labelEn": "A real risk taker",
+       "labelId": "Berani ambil risiko tinggi"
+      }
+     ]
+    },
+    {
+     "id": "q15",
+     "type": "single_choice",
+     "required": true,
+     "textEn": "You are offered one of the following financial choices. Which would you take?",
+     "textId": "Anda ditawari salah satu pilihan keuangan berikut. Mana yang Anda ambil?",
+     "options": [
+      {
+       "id": "certain_1m",
+       "labelEn": "Rp 1,000,000 in cash, guaranteed",
+       "labelId": "Rp 1.000.000 tunai, dijamin"
+      },
+      {
+       "id": "chance_5m",
+       "labelEn": "50% chance at Rp 5,000,000",
+       "labelId": "50% peluang dapat Rp 5.000.000"
+      },
+      {
+       "id": "chance_15m",
+       "labelEn": "20% chance at Rp 15,000,000",
+       "labelId": "20% peluang dapat Rp 15.000.000"
+      },
+      {
+       "id": "chance_100m",
+       "labelEn": "5% chance at Rp 100,000,000",
+       "labelId": "5% peluang dapat Rp 100.000.000"
+      }
+     ]
+    },
+    {
+     "id": "q16",
+     "type": "single_choice",
+     "required": true,
+     "textEn": "How would you rate your investment knowledge?",
+     "textId": "Bagaimana Anda menilai pengetahuan investasi Anda?",
+     "options": [
+      {
+       "id": "none",
+       "labelEn": "None — I don't understand investments",
+       "labelId": "Tidak ada — saya tidak paham investasi"
+      },
+      {
+       "id": "basic",
+       "labelEn": "Basic — I know the basics",
+       "labelId": "Dasar — saya tahu dasarnya"
+      },
+      {
+       "id": "intermediate",
+       "labelEn": "Intermediate — I invest regularly",
+       "labelId": "Menengah — saya rutin investasi"
+      },
+      {
+       "id": "advanced",
+       "labelEn": "Advanced — I actively manage my portfolio",
+       "labelId": "Lanjutan — saya aktif kelola portofolio"
+      }
+     ]
+    },
+    {
+     "id": "q16b",
+     "type": "single_choice",
+     "required": false,
+     "textEn": "Which of these statements is correct?",
+     "textId": "Manakah pernyataan berikut yang benar?",
+     "options": [
+      {
+       "id": "a",
+       "labelEn": "Compound interest means returns earn returns",
+       "labelId": "Bunga majemuk berarti imbal hasil menghasilkan imbal hasil"
+      },
+      {
+       "id": "b",
+       "labelEn": "Inflation increases the purchasing power of money",
+       "labelId": "Inflasi meningkatkan daya beli uang"
+      },
+      {
+       "id": "c",
+       "labelEn": "Diversification guarantees profit",
+       "labelId": "Diversifikasi menjamin keuntungan"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "section_5",
+   "nameEn": "Your Goals",
+   "nameId": "Tujuan Anda",
+   "icon": "target",
+   "questions": [
+    {
+     "id": "q17",
+     "type": "single_choice",
+     "required": true,
+     "textEn": "What is your primary financial goal?",
+     "textId": "Apa tujuan keuangan utama Anda?",
+     "options": [
+      {
+       "id": "emergency_fund",
+       "labelEn": "Build emergency fund",
+       "labelId": "Membangun dana darurat"
+      },
+      {
+       "id": "home_purchase",
+       "labelEn": "Buy a home",
+       "labelId": "Membeli rumah"
+      },
+      {
+       "id": "retirement",
+       "labelEn": "Retirement",
+       "labelId": "Pensiun"
+      },
+      {
+       "id": "children_education",
+       "labelEn": "Children's education",
+       "labelId": "Pendidikan anak"
+      },
+      {
+       "id": "hajj_umrah",
+       "labelEn": "Hajj / Umrah",
+       "labelId": "Haji / Umrah"
+      },
+      {
+       "id": "marriage",
+       "labelEn": "Marriage",
+       "labelId": "Pernikahan"
+      },
+      {
+       "id": "wealth_growth",
+       "labelEn": "Wealth growth",
+       "labelId": "Pertumbuhan kekayaan"
+      }
+     ]
+    },
+    {
+     "id": "q18",
+     "type": "numeric",
+     "required": true,
+     "textEn": "What is your target amount for this goal? (IDR)",
+     "textId": "Berapa target jumlah untuk tujuan ini? (Rupiah)",
+     "unit": "IDR",
+     "min": 0,
+     "max": 1000000000000,
+     "hintEn": "You can type 15m, 15 million or 15.000.000.",
+     "hintId": "Anda bisa mengetik 15jt, 15 juta atau 15.000.000."
+    },
+    {
+     "id": "q19",
+     "type": "single_choice",
+     "required": true,
+     "textEn": "What is your target timeline for this goal?",
+     "textId": "Berapa target waktu untuk tujuan ini?",
+     "options": [
+      {
+       "id": "lt_1",
+       "labelEn": "< 1 year",
+       "labelId": "< 1 tahun"
+      },
+      {
+       "id": "1_3",
+       "labelEn": "1–3 years",
+       "labelId": "1–3 tahun"
+      },
+      {
+       "id": "3_5",
+       "labelEn": "3–5 years",
+       "labelId": "3–5 tahun"
+      },
+      {
+       "id": "5_10",
+       "labelEn": "5–10 years",
+       "labelId": "5–10 tahun"
+      },
+      {
+       "id": "gt_10",
+       "labelEn": "> 10 years",
+       "labelId": "> 10 tahun"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "section_6",
+   "nameEn": "Preferences",
+   "nameId": "Preferensi Akhir",
+   "icon": "settings",
+   "questions": [
+    {
+     "id": "q20",
+     "type": "single_choice",
+     "required": true,
+     "textEn": "What is your home ownership status?",
+     "textId": "Apa status kepemilikan rumah Anda?",
+     "options": [
+      {
+       "id": "own_mortgage",
+       "labelEn": "Own with mortgage",
+       "labelId": "Milik sendiri dengan KPR"
+      },
+      {
+       "id": "own_outright",
+       "labelEn": "Own outright",
+       "labelId": "Milik sendiri, lunas"
+      },
+      {
+       "id": "rent",
+       "labelEn": "Rent",
+       "labelId": "Sewa"
+      },
+      {
+       "id": "living_with_family",
+       "labelEn": "Living with family",
+       "labelId": "Tinggal dengan keluarga"
+      }
+     ]
+    },
+    {
+     "id": "q21",
+     "type": "single_choice",
+     "required": true,
+     "textEn": "Have you invested in stocks, mutual funds, or bonds before?",
+     "textId": "Apakah Anda pernah berinvestasi di saham, reksa dana, atau obligasi?",
+     "options": [
+      {
+       "id": "never",
+       "labelEn": "Never",
+       "labelId": "Belum pernah"
+      },
+      {
+       "id": "yes_not_active",
+       "labelEn": "Yes, but not actively",
+       "labelId": "Pernah, tapi tidak aktif"
+      },
+      {
+       "id": "yes_active",
+       "labelEn": "Yes, actively",
+       "labelId": "Pernah, dan aktif"
+      }
+     ]
+    },
+    {
+     "id": "q22",
+     "type": "single_choice",
+     "required": true,
+     "textEn": "Do you prefer sharia-compliant financial products?",
+     "textId": "Apakah Anda preferensi produk keuangan syariah?",
+     "options": [
+      {
+       "id": "yes",
+       "labelEn": "Yes, sharia-compliant only",
+       "labelId": "Ya, hanya syariah"
+      },
+      {
+       "id": "prefer",
+       "labelEn": "Prefer sharia if available",
+       "labelId": "Preferensi syariah jika tersedia"
+      },
+      {
+       "id": "no",
+       "labelEn": "No preference",
+       "labelId": "Tidak ada preferensi"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
