@@ -17,8 +17,19 @@ type Config struct {
 	CORSOrigins     []string
 	AIServiceURL    string
 	InternalAPIKey  string
+	AIInternalKey   string // sent to the AI service as X-Internal-Api-Key
 	ShutdownTimeout time.Duration
 	Auth            AuthConfig
+	WA              WAConfig
+}
+
+// WAConfig configures the GoWA gateway (self-hosted WhatsApp REST API) and the daily briefing scheduler.
+type WAConfig struct {
+	BaseURL       string
+	BasicUser     string
+	BasicPassword string
+	WebhookSecret string
+	DailyEnabled  bool
 }
 
 type AuthConfig struct {
@@ -47,7 +58,15 @@ func Load() (Config, error) {
 		CORSOrigins:     split(get("CORS_ORIGINS", "http://localhost:3000")),
 		AIServiceURL:    get("AI_SERVICE_URL", "http://localhost:8001"),
 		InternalAPIKey:  os.Getenv("INTERNAL_API_KEY"),
+		AIInternalKey:   get("AI_INTERNAL_API_KEY", os.Getenv("INTERNAL_API_KEY")),
 		ShutdownTimeout: 15 * time.Second,
+		WA: WAConfig{
+			BaseURL:       get("GOWA_BASE_URL", "http://localhost:3000"),
+			BasicUser:     os.Getenv("GOWA_BASIC_AUTH_USER"),
+			BasicPassword: os.Getenv("GOWA_BASIC_AUTH_PASSWORD"),
+			WebhookSecret: os.Getenv("GOWA_WEBHOOK_SECRET"),
+			DailyEnabled:  os.Getenv("WA_DAILY_ENABLED") == "true",
+		},
 		Auth: AuthConfig{
 			JWTSecret:      get("JWT_SECRET", devJWTSecret),
 			AccessTTL:      15 * time.Minute,

@@ -35,7 +35,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	deps := app.Deps{Config: cfg}
+	deps := app.Deps{Config: cfg, Ctx: ctx}
 	if cfg.DatabaseURL != "" {
 		pool, err := database.Connect(ctx, cfg.DatabaseURL)
 		if err != nil {
