@@ -11,9 +11,18 @@ import (
 	"shenzen/backend/internal/platform/config"
 )
 
+func newRouter(t *testing.T) http.Handler {
+	t.Helper()
+	h, err := app.NewRouter(app.Deps{Config: config.Config{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
 func call(t *testing.T, method, path, body string) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
-	h := app.NewRouter(app.Deps{Config: config.Config{}})
+	h := newRouter(t)
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -57,7 +66,7 @@ func TestErrorEnvelopes(t *testing.T) {
 }
 
 func TestCreateThenGet(t *testing.T) {
-	h := app.NewRouter(app.Deps{Config: config.Config{}})
+	h := newRouter(t)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/v1/notes", strings.NewReader(`{"title":"  hello ","body":"b"}`)))
 	if rec.Code != http.StatusCreated {

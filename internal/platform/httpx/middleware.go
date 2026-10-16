@@ -79,6 +79,7 @@ func CORS(origins []string) func(http.Handler) http.Handler {
 				h := w.Header()
 				h.Set("Access-Control-Allow-Origin", o)
 				h.Set("Vary", "Origin")
+				h.Set("Access-Control-Allow-Credentials", "true")
 				h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, "+RequestIDHeader)
 				h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 				h.Set("Access-Control-Expose-Headers", RequestIDHeader)

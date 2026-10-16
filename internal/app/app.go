@@ -4,10 +4,16 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"log/slog"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	authapp "shenzen/backend/internal/features/auth/application"
+	authdomain "shenzen/backend/internal/features/auth/domain"
+	authinfra "shenzen/backend/internal/features/auth/infrastructure"
+	authhttp "shenzen/backend/internal/features/auth/transport"
 	"shenzen/backend/internal/features/health"
 	noteapp "shenzen/backend/internal/features/note/application"
 	noteinfra "shenzen/backend/internal/features/note/infrastructure"
@@ -19,9 +25,10 @@ import (
 type Deps struct {
 	Config config.Config
 	DB     interface{ Ping(context.Context) error }
+	Pool   *pgxpool.Pool
 }
 
-func NewRouter(d Deps) *chi.Mux {
+func NewRouter(d Deps) (*chi.Mux, error) {
 	r := httpx.NewRouter(d.Config.CORSOrigins)
 
 	checks := map[string]health.Pinger{}
@@ -31,10 +38,40 @@ func NewRouter(d Deps) *chi.Mux {
 	health.New(checks).Routes(r)
 
 	noteSvc := noteapp.NewService(noteinfra.NewMemoryRepo(), newID, time.Now)
+	authSvc, err := newAuthService(d)
+	if err != nil {
+		return nil, err
+	}
 	r.Route("/api/v1", func(r chi.Router) {
 		notehttp.New(noteSvc).Routes(r)
+		if authSvc != nil {
+			authhttp.New(authSvc, d.Config.IsProduction()).Routes(r)
+		}
 	})
-	return r
+	return r, nil
+}
+
+// newAuthService returns nil when there is no database, so the rest of the API still runs.
+func newAuthService(d Deps) (*authapp.Service, error) {
+	if d.Pool == nil {
+		slog.Warn("auth disabled: DATABASE_URL is not set")
+		return nil, nil
+	}
+	c := d.Config.Auth
+	var mailer authdomain.Mailer = authinfra.LogMailer{}
+	if c.SMTPHost != "" {
+		mailer = authinfra.NewSMTPMailer(authinfra.SMTPConfig{Host: c.SMTPHost, Port: c.SMTPPort, User: c.SMTPUser, Password: c.SMTPPassword, From: c.MailFrom})
+	}
+	var google authdomain.GoogleVerifier
+	if c.GoogleClientID != "" {
+		google = authinfra.NewGoogleVerifier(c.GoogleClientID)
+	}
+	return authapp.NewService(authapp.Deps{
+		Users: authinfra.NewUserRepo(d.Pool), OTPs: authinfra.NewOTPRepo(d.Pool), Sessions: authinfra.NewSessionRepo(d.Pool),
+		Hasher: authinfra.NewBcrypt(12), Tokens: authinfra.NewJWT(c.JWTSecret, "shenzen", c.AccessTTL),
+		Mailer: mailer, Google: google, NewID: newID, Now: time.Now,
+		Config: authapp.Config{RefreshTTL: c.RefreshTTL, RememberTTL: c.RememberTTL},
+	})
 }
 
 func newID() string {

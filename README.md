@@ -42,3 +42,22 @@ Contract: [docs/error-contract.md](docs/error-contract.md).
 1. `make migrate-new name=create_things`, write SQL.
 2. Put queries in `db/queries/things.sql`, run `make sqlc` (generates into `internal/platform/database/sqlcgen`).
 3. Implement the domain repository in `infrastructure/` on top of the generated code; translate `pgx.ErrNoRows` to `NOT_FOUND` and unique violations to `CONFLICT`.
+
+## Auth slice
+
+`internal/features/auth` (domain / application / infrastructure / transport). Endpoints under `/api/v1/auth`:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/register` | create unverified account, email a 6-digit OTP |
+| POST | `/verify-email` | consume OTP, mark verified, start session |
+| POST | `/resend-otp` | new OTP (60s cooldown, never reveals accounts) |
+| POST | `/login` | email + password (`remember` extends the refresh cookie to 30 days) |
+| POST | `/google` | exchange a Google access token for a session |
+| POST | `/forgot-password`, `/reset-password` | OTP-based reset, ends all sessions |
+| POST | `/refresh`, `/logout` | rotate / revoke the `refresh_token` httpOnly cookie |
+| GET | `/me` | current user (Bearer access token) |
+
+Access token: 15 min JWT (HS256) returned in JSON. Refresh token: opaque, stored hashed, rotated on every use; a replay after a 10s grace window revokes every session of the user.
+
+Config (`.env`): `JWT_SECRET` (32+ chars), `GOOGLE_CLIENT_ID`, `SMTP_*`, `MAIL_FROM`, TTLs. With no `SMTP_HOST` the OTP is printed to the log (development only; production requires SMTP). Auth is mounted only when `DATABASE_URL` is set; run `make migrate-up` first.

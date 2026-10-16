@@ -42,12 +42,16 @@ func run() error {
 			return err
 		}
 		defer pool.Close()
-		deps.DB = pool
+		deps.DB, deps.Pool = pool, pool
+	}
+	router, err := app.NewRouter(deps)
+	if err != nil {
+		return err
 	}
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           app.NewRouter(deps),
+		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
