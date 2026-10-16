@@ -18,11 +18,16 @@ import (
 	noteapp "shenzen/backend/internal/features/note/application"
 	noteinfra "shenzen/backend/internal/features/note/infrastructure"
 	notehttp "shenzen/backend/internal/features/note/transport"
+	profileapp "shenzen/backend/internal/features/profile/application"
+	profileinfra "shenzen/backend/internal/features/profile/infrastructure"
+	profilehttp "shenzen/backend/internal/features/profile/transport"
+	"shenzen/backend/internal/platform/aiclient"
 	"shenzen/backend/internal/platform/config"
 	"shenzen/backend/internal/platform/httpx"
 )
 
 type Deps struct {
+	Ctx    context.Context // lifetime of background jobs (WhatsApp scheduler); nil means context.Background()
 	Config config.Config
 	DB     interface{ Ping(context.Context) error }
 	Pool   *pgxpool.Pool
@@ -45,7 +50,14 @@ func NewRouter(d Deps) (*chi.Mux, error) {
 	r.Route("/api/v1", func(r chi.Router) {
 		notehttp.New(noteSvc).Routes(r)
 		if authSvc != nil {
-			authhttp.New(authSvc, d.Config.IsProduction()).Routes(r)
+			authH := authhttp.New(authSvc, d.Config.IsProduction())
+			authH.Routes(r)
+			if d.Pool != nil {
+				profileSvc := newProfileService(d)
+				profilehttp.New(profileSvc, authH.RequireAuth, authhttp.UserID).Routes(r)
+				mountAdvice(r, d, authH, profileSvc) // matching engine + WhatsApp (advice_wiring.go)
+				mountDashboard(r, d, authH)          // portfolio, dashboard, news (dashboard_wiring.go)
+			}
 		}
 	})
 	return r, nil
@@ -72,6 +84,11 @@ func newAuthService(d Deps) (*authapp.Service, error) {
 		Mailer: mailer, Google: google, NewID: newID, Now: time.Now,
 		Config: authapp.Config{RefreshTTL: c.RefreshTTL, RememberTTL: c.RememberTTL},
 	})
+}
+
+func newProfileService(d Deps) *profileapp.Service {
+	ai := profileinfra.NewExplainer(aiclient.New(d.Config.AIServiceURL, d.Config.AIInternalKey, 15*time.Second))
+	return profileapp.NewService(profileinfra.NewRepo(d.Pool), ai, newID, time.Now)
 }
 
 func newID() string {
