@@ -8,7 +8,7 @@ export
 # Raw market data folder (not abspath: CURDIR contains spaces). Override with DATA_DIR=...
 DATA_DIR ?= $(CURDIR)/../data/assets&news
 
-.PHONY: run build test lint fmt tidy migrate-up migrate-down migrate-new sqlc check import-market classify-assets
+.PHONY: run build test lint fmt tidy migrate-up migrate-down migrate-new sqlc check import-market classify-assets refresh-metrics
 
 run:
 	go run ./cmd/api
@@ -47,3 +47,6 @@ import-market:
 
 classify-assets:
 	go run ./cmd/classifier $(CLASSIFY_ARGS)
+
+refresh-metrics:
+	go run ./cmd/metrics
