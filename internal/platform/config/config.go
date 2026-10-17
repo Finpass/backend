@@ -28,6 +28,8 @@ type WAConfig struct {
 	BaseURL       string
 	BasicUser     string
 	BasicPassword string
+	DeviceID      string
+	PublicURL     string // where briefing links point, no trailing slash needed
 	WebhookSecret string
 	DailyEnabled  bool
 }
@@ -64,6 +66,8 @@ func Load() (Config, error) {
 			BaseURL:       get("GOWA_BASE_URL", "http://localhost:3000"),
 			BasicUser:     os.Getenv("GOWA_BASIC_AUTH_USER"),
 			BasicPassword: os.Getenv("GOWA_BASIC_AUTH_PASSWORD"),
+			DeviceID:      get("GOWA_DEVICE_ID", "finpass"),
+			PublicURL:     get("PUBLIC_APP_URL", "https://finpass.com"),
 			WebhookSecret: os.Getenv("GOWA_WEBHOOK_SECRET"),
 			DailyEnabled:  os.Getenv("WA_DAILY_ENABLED") == "true",
 		},
