@@ -222,6 +222,17 @@ Data decisions (made after inspecting the real rows):
 - `assetClass` in items is the raw source class (`gold` is separate from `commodity` there; labels `Emas`/`Gold`); the `commodity` filter and facet cover both.
 - Search results follow the chosen sort, not relevance: searching `AAPL` lists matches by symbol when market cap is null for all of them.
 
+## Advisory chat (RAG)
+
+Slice `internal/features/advisory`, wired in `internal/app/advisory_wiring.go`, mounted only when `DATABASE_URL` is set. Migration `db/migrations/20261020100001_create_advisory_chat.sql` (`chat_sessions`, `chat_messages`; the `rag_*` tables belong to the AI service). Contract: `../documentation/advisory-contract.md` section 2. The backend builds the user context (profile facts, holdings weighted by market value, recommended classes and picks from the matching engine; no name, email or phone), sends the last 6 stored messages and calls `POST {AI_SERVICE_URL}/ml/rag/chat` with `X-Internal-Api-Key` (timeout 60 s, no retry). Env: `AI_SERVICE_URL`, `AI_INTERNAL_API_KEY`.
+
+| Method | Path | Notes |
+|--------|------|-------|
+| POST | `/api/v1/advisory/chat` | body `{sessionId?, message (1..1000), lang: "id"\|"en"}` -> `{sessionId, message{id,role,content,citations,createdAt}, grounded}`. 404 without a completed profile ("Complete the financial profile first") or for another user's session, 429 above 20 messages per user per minute, 502 when the AI service fails (the user message stays stored, the client can retry) |
+| GET | `/api/v1/advisory/sessions` | `{items:[{id,title,updatedAt}]}` newest first, max 50 |
+| GET | `/api/v1/advisory/sessions/{id}` | `{id,title,messages[{id,role,content,citations,createdAt}]}`, 404 for other users |
+| DELETE | `/api/v1/advisory/sessions/{id}` | 204, 404 for other users |
+
 ## Matching engine
 
 Slice `internal/features/matching` implements `documentation/YAML MATCHING ENGINE.yaml` as pure Go (`domain/`, no I/O): rules decide every number, the text is a deterministic template (the AI service is not called). Endpoints (auth required, no completed profile = 404):
