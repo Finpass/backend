@@ -143,6 +143,31 @@ func (s *Service) SaveAnswers(ctx context.Context, userID string, cmd SaveComman
 	return Saved{Answers: p.Answers, OptOut: p.OptOut, CurrentSection: p.CurrentSection, Missing: domain.Missing(p.Answers, p.OptOut)}, nil
 }
 
+// UpdateCash changes the liquid savings answer (q4) of a completed profile. The profile stays the single source of the
+// cash figure that the dashboard shows; stored assessments are immutable audit records and keep their own copy of the answer.
+func (s *Service) UpdateCash(ctx context.Context, userID string, amount int64) error {
+	p, err := s.repo.Profile(ctx, userID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.ErrNoProfile
+	} else if err != nil {
+		return err
+	}
+	if p.Status != domain.StatusCompleted {
+		return domain.ErrNoProfile
+	}
+	a := domain.Answers{"q4": float64(amount)}
+	if d := domain.ValidateAnswers(a, nil); len(d) > 0 {
+		return apperr.Validation(d...)
+	}
+	next := make(domain.Answers, len(p.Answers)+1)
+	for k, v := range p.Answers {
+		next[k] = v
+	}
+	next["q4"] = float64(amount)
+	p.Answers, p.UpdatedAt = next, s.now()
+	return s.repo.SaveDraft(ctx, p) // status stays completed: SaveDraft writes the status it is given
+}
+
 func (s *Service) Submit(ctx context.Context, userID, locale string) (domain.Result, error) {
 	if err := s.requireConsent(ctx, userID); err != nil {
 		return domain.Result{}, err

@@ -459,3 +459,40 @@ func TestUsersAreIsolated(t *testing.T) {
 		t.Fatalf("%+v", v)
 	}
 }
+
+func TestUpdateCashChangesOnlyQ4OfACompletedProfile(t *testing.T) {
+	e := newEnv(t)
+	e.ready(t)
+	ctx := context.Background()
+	if err := e.svc.UpdateCash(ctx, uid, 5_000_000); code(err) != apperr.NotFound {
+		t.Fatalf("a draft profile has no cash to edit: %v", err)
+	}
+	if _, err := e.svc.Submit(ctx, uid, "id"); err != nil {
+		t.Fatal(err)
+	}
+	before := e.repo.profiles[uid]
+	if err := e.svc.UpdateCash(ctx, uid, 12_500_000); err != nil {
+		t.Fatal(err)
+	}
+	after := e.repo.profiles[uid]
+	if after.Status != domain.StatusCompleted || after.Answers["q4"] != float64(12_500_000) {
+		t.Errorf("status %s q4 %v", after.Status, after.Answers["q4"])
+	}
+	for k, v := range before.Answers {
+		if k != "q4" && fmt.Sprint(after.Answers[k]) != fmt.Sprint(v) {
+			t.Errorf("answer %s changed: %v -> %v", k, v, after.Answers[k])
+		}
+	}
+	if before.Answers["q4"] == after.Answers["q4"] {
+		t.Error("the stored map must be copied, not shared")
+	}
+	if len(e.repo.assessments) != 1 {
+		t.Errorf("assessments are immutable audit records, got %d", len(e.repo.assessments))
+	}
+	if err := e.svc.UpdateCash(ctx, "someone-else", 1); code(err) != apperr.NotFound {
+		t.Errorf("unknown user: %v", err)
+	}
+	if err := e.svc.UpdateCash(ctx, uid, -1); code(err) != apperr.ValidationFailed {
+		t.Errorf("negative amount: %v", err)
+	}
+}

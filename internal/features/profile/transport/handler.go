@@ -29,6 +29,7 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Method(http.MethodGet, "/", httpx.HandlerFunc(h.get))
 		r.Method(http.MethodPost, "/consent", httpx.HandlerFunc(h.consent))
 		r.Method(http.MethodPut, "/answers", httpx.HandlerFunc(h.saveAnswers))
+		r.Method(http.MethodPut, "/cash", httpx.HandlerFunc(h.cash))
 		r.Method(http.MethodPost, "/submit", httpx.HandlerFunc(h.submit))
 		r.Method(http.MethodGet, "/result", httpx.HandlerFunc(h.result))
 		r.Method(http.MethodPost, "/retake", httpx.HandlerFunc(h.retake))
@@ -130,5 +131,22 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+type cashRequest struct {
+	Amount int64 `json:"amount" validate:"min=0"`
+}
+
+// cash sets the liquid savings that also appear as the Cash row of the portfolio page.
+func (h *Handler) cash(w http.ResponseWriter, r *http.Request) error {
+	req, err := httpx.Decode[cashRequest](w, r)
+	if err != nil {
+		return err
+	}
+	if err := h.svc.UpdateCash(r.Context(), h.userID(r.Context()), req.Amount); err != nil {
+		return err
+	}
+	httpx.OK(w, http.StatusOK, "Cash updated", map[string]int64{"amount": req.Amount})
 	return nil
 }
