@@ -3,6 +3,7 @@ package domain
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -99,6 +100,13 @@ type Candidate struct {
 	PositiveMonths                                                                  int
 	PER, PBV, ROE, DivYield, Beta, ExpenseRatio                                     *float64        // ROE as percent, DivYield as percent
 	Rets                                                                            map[int]float64 // daily returns keyed by yyyymmdd
+	Series                                                                          []SeriesPoint   // one year rebased to 100; only filled by Lookup (comparison charts)
+}
+
+// SeriesPoint is one point of a price path rebased so the first day is 100.
+type SeriesPoint struct {
+	Date  string  `json:"d"`
+	Value float64 `json:"v"`
 }
 
 // Holding is a current position with the quote facts needed for alerts. Values are IDR.
@@ -162,4 +170,24 @@ type MacroReader interface {
 }
 type HistoryReader interface {
 	History(ctx context.Context, userID string, days int) ([]DayRecord, error)
+}
+
+// Lookuper resolves specific symbols to scoring candidates, bypassing the per-class liquidity cut of Catalog.
+// Symbols without a classification or enough price history are simply absent from the result.
+type Lookuper interface {
+	Lookup(ctx context.Context, symbols []string) ([]Candidate, error)
+}
+
+// SuitabilityRecord is one audit entry: what the profile and rules produced, kept so a suggestion can be explained later.
+type SuitabilityRecord struct {
+	ID        int64           `json:"id"`
+	Kind      string          `json:"kind"` // comparison | portfolio
+	Payload   json.RawMessage `json:"payload"`
+	CreatedAt time.Time       `json:"createdAt"`
+}
+
+// Auditor stores suitability records; a record identical to the user's latest of that kind is not stored twice.
+type Auditor interface {
+	Record(ctx context.Context, userID, kind string, payload any) error
+	List(ctx context.Context, userID string, limit int) ([]SuitabilityRecord, error)
 }

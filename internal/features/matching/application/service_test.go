@@ -109,3 +109,50 @@ func TestDailyDegradesInsteadOfFailing(t *testing.T) {
 		t.Fatalf("%+v %v", res, err)
 	}
 }
+
+type flook struct{ c []domain.Candidate }
+
+func (f flook) Lookup(_ context.Context, syms []string) ([]domain.Candidate, error) {
+	var out []domain.Candidate
+	for _, c := range f.c {
+		for _, s := range syms {
+			if c.Symbol == s {
+				out = append(out, c)
+			}
+		}
+	}
+	return out, nil
+}
+
+type faudit struct{ kinds []string }
+
+func (a *faudit) Record(_ context.Context, _, kind string, _ any) error {
+	a.kinds = append(a.kinds, kind)
+	return nil
+}
+func (*faudit) List(context.Context, string, int) ([]domain.SuitabilityRecord, error) {
+	return nil, nil
+}
+
+func TestCompare(t *testing.T) {
+	mk := func(sym string, ret float64) domain.Candidate {
+		return domain.Candidate{Symbol: sym, Name: sym, Class: domain.ClassLargeCap, Sharia: "sharia_compliant", Volatility: "medium", Liquidity: "high", Return1Y: ret, Vol: 18, PositiveMonths: 7}
+	}
+	au := &faudit{}
+	s := NewService(Deps{Profiles: fp{p: profile()}, Catalog: fc{}, Lookup: flook{[]domain.Candidate{mk("A", 12), mk("B", 5)}}, Audit: au, Now: time.Now})
+	res, err := s.Compare(context.Background(), "u", []string{" a ", "B", "zzz", "A"})
+	if err != nil || len(res.Assets) != 2 || res.Assets[0].Symbol != "A" || len(res.NotFound) != 1 || res.NotFound[0] != "ZZZ" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if len(au.kinds) != 1 || au.kinds[0] != "comparison" {
+		t.Errorf("audit: %v", au.kinds)
+	}
+	for _, bad := range [][]string{{"A"}, {"A", "a"}, {"A", "B", "C", "D", "E"}} {
+		if _, err := s.Compare(context.Background(), "u", bad); !errors.Is(err, ErrCompareCount) {
+			t.Errorf("%v: %v", bad, err)
+		}
+	}
+	if _, err := NewService(Deps{Profiles: fp{p: profile()}}).Compare(context.Background(), "u", []string{"A", "B"}); !errors.Is(err, ErrCompareDisabled) {
+		t.Error("nil lookup")
+	}
+}

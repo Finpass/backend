@@ -33,10 +33,13 @@ var (
 // matching returns the process-wide matching service (its catalog cache is shared by every caller).
 func matching(d Deps) *matchapp.Service {
 	matchOnce.Do(func() {
+		catalog := matchinfra.NewCatalog(d.Pool)
 		matchSvc = matchapp.NewService(matchapp.Deps{
 			Profiles: profileBridge{profileinfra.NewRepo(d.Pool)},
 			Holdings: matchinfra.NewHoldings(d.Pool),
-			Catalog:  matchinfra.NewCatalog(d.Pool),
+			Catalog:  catalog,
+			Lookup:   catalog,
+			Audit:    matchinfra.NewAudit(d.Pool),
 			News:     matchinfra.NewNews(d.Pool),
 			Macro:    matchinfra.NewMacro(d.Pool),
 			History:  matchinfra.NewHistory(d.Pool),

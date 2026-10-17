@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -17,6 +18,8 @@ type Deps struct {
 	News     domain.NewsReader
 	Macro    domain.MacroReader
 	History  domain.HistoryReader
+	Lookup   domain.Lookuper // product comparison; nil disables it
+	Audit    domain.Auditor  // suitability trail; nil disables it
 	Now      func() time.Time
 }
 
@@ -68,6 +71,7 @@ func (s *Service) Products(ctx context.Context, userID string) (ProductResult, e
 		ProductOutput: out, GeneratedAt: s.d.Now().UTC().Format(time.RFC3339),
 	}
 	res.Summary = summaryText(p, out.Trace.TargetAllocation.Target)
+	s.audit(ctx, userID, "portfolio", portfolioAudit(res))
 	return res, nil
 }
 
@@ -169,4 +173,109 @@ func (s *Service) Daily(ctx context.Context, userID string, localNow time.Time) 
 	}
 	res.Output = domain.MatchDaily(in)
 	return res, nil
+}
+
+// audit is best effort: a failed write must never break the answer the user asked for.
+func (s *Service) audit(ctx context.Context, userID, kind string, payload any) {
+	if s.d.Audit == nil {
+		return
+	}
+	if err := s.d.Audit.Record(ctx, userID, kind, payload); err != nil {
+		slog.WarnContext(ctx, "matching: audit failed", "kind", kind, "err", err)
+	}
+}
+
+func portfolioAudit(r ProductResult) map[string]any {
+	picks := map[string][]string{}
+	for _, c := range r.Portfolio {
+		for _, a := range c.Assets {
+			if a.Kind == "asset" {
+				picks[c.Class] = append(picks[c.Class], a.Ticker)
+			}
+		}
+	}
+	return map[string]any{
+		"profile": r.Profile, "investable": r.Investable, "target": r.Trace.TargetAllocation.Target,
+		"modifiers": r.Trace.TargetAllocation.Modifiers, "gates": r.Trace.GatesApplied, "picks": picks,
+	}
+}
+
+var ErrCompareCount = errors.New("matching: compare needs 2 to 4 distinct symbols")
+var ErrCompareDisabled = errors.New("matching: compare unavailable")
+
+type CompareResult struct {
+	Profile ProfileSummary `json:"profile"`
+	domain.CompareOutput
+	NotFound    []string `json:"notFound"`
+	GeneratedAt string   `json:"generatedAt"`
+}
+
+// Compare lines up 2 to 4 assets against the user's profile with the same gates and score as the portfolio.
+func (s *Service) Compare(ctx context.Context, userID string, symbols []string) (CompareResult, error) {
+	if s.d.Lookup == nil {
+		return CompareResult{}, ErrCompareDisabled
+	}
+	seen, want := map[string]bool{}, []string{}
+	for _, sym := range symbols {
+		sym = strings.ToUpper(strings.TrimSpace(sym))
+		if sym != "" && !seen[sym] {
+			seen[sym] = true
+			want = append(want, sym)
+		}
+	}
+	if len(want) < domain.MinCompare || len(want) > domain.MaxCompare {
+		return CompareResult{}, ErrCompareCount
+	}
+	p, err := s.d.Profiles.Profile(ctx, userID)
+	if err != nil {
+		return CompareResult{}, err
+	}
+	found, err := s.d.Lookup.Lookup(ctx, want)
+	if err != nil {
+		return CompareResult{}, err
+	}
+	by := map[string]domain.Candidate{}
+	for _, c := range found {
+		by[c.Symbol] = c
+	}
+	var cands []domain.Candidate
+	res := CompareResult{NotFound: []string{}}
+	for _, sym := range want { // keep the order the user picked
+		if c, ok := by[sym]; ok {
+			cands = append(cands, c)
+		} else {
+			res.NotFound = append(res.NotFound, sym)
+		}
+	}
+	rf, err := s.d.Catalog.RiskFree(ctx)
+	if err != nil {
+		rf = 0
+	}
+	sig, err := s.d.Catalog.Signals(ctx)
+	if err != nil {
+		sig = domain.MacroSignals{}
+	}
+	res.Profile = ProfileSummary{p.Risk, p.Ladder, p.Sharia, fmt.Sprintf("%.1f", p.HorizonYears())}
+	res.CompareOutput = domain.Compare(p, cands, rf, sig)
+	res.GeneratedAt = s.d.Now().UTC().Format(time.RFC3339)
+	if len(cands) >= domain.MinCompare {
+		s.audit(ctx, userID, "comparison", comparisonAudit(res))
+	}
+	return res, nil
+}
+
+func comparisonAudit(r CompareResult) map[string]any {
+	rows := make([]map[string]any, 0, len(r.Assets))
+	for _, a := range r.Assets {
+		rows = append(rows, map[string]any{"symbol": a.Symbol, "class": a.Class, "eligible": a.Gate.Eligible, "gate": a.Gate.Gate, "score": a.Score.Total, "rank": a.Rank})
+	}
+	return map[string]any{"profile": r.Profile, "assets": rows, "best": r.Best}
+}
+
+// Suitability returns the user's latest audit records, newest first.
+func (s *Service) Suitability(ctx context.Context, userID string, limit int) ([]domain.SuitabilityRecord, error) {
+	if s.d.Audit == nil {
+		return []domain.SuitabilityRecord{}, nil
+	}
+	return s.d.Audit.List(ctx, userID, limit)
 }

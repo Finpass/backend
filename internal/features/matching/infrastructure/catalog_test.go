@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
@@ -50,5 +51,20 @@ func TestCatalogCandidates(t *testing.T) {
 	again, _ := c.Candidates(context.Background())
 	if len(again) != len(cands) {
 		t.Error("cache")
+	}
+}
+
+func TestRebasedStartsAtHundredAndKeepsLastDay(t *testing.T) {
+	var s []point
+	d := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 400; i++ {
+		s = append(s, point{d.AddDate(0, 0, i), 50 + float64(i)})
+	}
+	out := rebased(s)
+	if len(out) == 0 || len(out) > maxSeriesPoints+1 || out[0].Value != 100 {
+		t.Fatalf("len %d first %+v", len(out), out[0])
+	}
+	if out[len(out)-1].Date != s[len(s)-1].d.Format("2006-01-02") {
+		t.Errorf("last day dropped: %+v", out[len(out)-1])
 	}
 }

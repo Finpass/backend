@@ -35,7 +35,7 @@ func (c *Catalog) Candidates(ctx context.Context) ([]domain.Candidate, error) {
 	if c.last != nil && time.Since(c.at) < c.ttl {
 		return c.last, nil
 	}
-	rows, err := c.pool.Query(ctx, `
+	out, err := c.load(ctx, false, `
 		SELECT symbol, name, currency, asset_class, sector, sharia_status, geography, volatility_class, liquidity_class, annualized_vol, info FROM (
 		  SELECT c.symbol, a.name, coalesce(a.currency,'') currency, c.asset_class, c.sector, c.sharia_status, c.geography, c.volatility_class, c.liquidity_class,
 		         c.annualized_vol, f.info,
@@ -43,6 +43,25 @@ func (c *Catalog) Candidates(ctx context.Context) ([]domain.Candidate, error) {
 		  FROM asset_classifications c JOIN assets a ON a.symbol = c.symbol LEFT JOIN fundamentals f ON f.symbol = c.symbol
 		  WHERE c.asset_class = ANY($1) AND c.volatility_class <> 'unknown' AND c.liquidity_class <> 'unknown' AND c.annualized_vol IS NOT NULL
 		) t WHERE rn <= $2`, catalogClasses, perClass)
+	if err != nil {
+		return nil, err
+	}
+	c.last, c.at = out, time.Now()
+	return out, nil
+}
+
+// Lookup resolves the given symbols directly, so a comparison can include assets outside the cached liquidity cut.
+func (c *Catalog) Lookup(ctx context.Context, symbols []string) ([]domain.Candidate, error) {
+	return c.load(ctx, true, `
+		SELECT c.symbol, a.name, coalesce(a.currency,''), c.asset_class, c.sector, c.sharia_status, c.geography, c.volatility_class, c.liquidity_class, c.annualized_vol, f.info
+		FROM asset_classifications c JOIN assets a ON a.symbol = c.symbol LEFT JOIN fundamentals f ON f.symbol = c.symbol
+		WHERE c.symbol = ANY($1) AND c.asset_class = ANY($2) AND c.volatility_class <> 'unknown' AND c.liquidity_class <> 'unknown' AND c.annualized_vol IS NOT NULL`,
+		symbols, catalogClasses)
+}
+
+// load runs a candidate query, then attaches price statistics; candidates without enough history are dropped.
+func (c *Catalog) load(ctx context.Context, withSeries bool, query string, args ...any) ([]domain.Candidate, error) {
+	rows, err := c.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -76,11 +95,13 @@ func (c *Catalog) Candidates(ctx context.Context) ([]domain.Candidate, error) {
 	out := cands[:0]
 	for _, x := range cands {
 		if s, ok := series[x.Symbol]; ok && fillStats(&x, s) {
+			if withSeries {
+				x.Series = rebased(s)
+			}
 			out = append(out, x)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Symbol < out[j].Symbol })
-	c.last, c.at = out, time.Now()
 	return out, nil
 }
 
@@ -178,6 +199,29 @@ func fillStats(x *domain.Candidate, s []point) bool {
 		}
 	}
 	return !math.IsNaN(x.Return1Y)
+}
+
+const maxSeriesPoints = 60
+
+// rebased turns the last year of closes into at most maxSeriesPoints points starting at 100, always keeping the last day.
+func rebased(s []point) []domain.SeriesPoint {
+	last := s[len(s)-1]
+	i := 0
+	for ; i < len(s)-1 && s[i].d.Before(last.d.AddDate(-1, 0, 0)); i++ {
+	}
+	win := s[i:]
+	if len(win) == 0 || win[0].c <= 0 {
+		return nil
+	}
+	step := (len(win) + maxSeriesPoints - 1) / maxSeriesPoints
+	var out []domain.SeriesPoint
+	for k := 0; k < len(win); k += step {
+		out = append(out, domain.SeriesPoint{Date: win[k].d.Format("2006-01-02"), Value: math.Round(win[k].c/win[0].c*1000) / 10})
+	}
+	if end := win[len(win)-1]; out[len(out)-1].Date != end.d.Format("2006-01-02") {
+		out = append(out, domain.SeriesPoint{Date: end.d.Format("2006-01-02"), Value: math.Round(end.c/win[0].c*1000) / 10})
+	}
+	return out
 }
 
 // RiskFree is the latest 1Y yield (percent) of the treasury curve in the data.

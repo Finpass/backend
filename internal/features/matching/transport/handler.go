@@ -31,12 +31,20 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Use(h.auth)
 		r.Method(http.MethodGet, "/products", httpx.HandlerFunc(h.products))
 		r.Method(http.MethodGet, "/daily", httpx.HandlerFunc(h.daily))
+		r.Method(http.MethodPost, "/compare", httpx.HandlerFunc(h.compare))
+		r.Method(http.MethodGet, "/suitability", httpx.HandlerFunc(h.suitability))
 	})
 }
 
 func mapErr(err error) error {
 	if errors.Is(err, domain.ErrNoProfile) {
 		return apperr.New(apperr.NotFound, "Complete the financial profile first")
+	}
+	if errors.Is(err, application.ErrCompareCount) {
+		return apperr.New(apperr.BadRequest, "Pick 2 to 4 different products to compare")
+	}
+	if errors.Is(err, application.ErrCompareDisabled) {
+		return apperr.New(apperr.Unprocessable, "Product comparison is unavailable")
 	}
 	return err
 }
@@ -75,5 +83,31 @@ func (h *Handler) daily(w http.ResponseWriter, r *http.Request) error {
 	httpx.OK(w, http.StatusOK, "Daily content matching fetched", dailyResponse{
 		Date: now.Format("2006-01-02"), Degraded: res.Degraded, Alert: o.Alert, News: o.News, MoreNews: o.MoreNews, Macro: o.Macro, Nudge: o.Nudge, Quiet: o.QuietMarket, Trace: o.Trace,
 	})
+	return nil
+}
+
+type compareRequest struct {
+	Symbols []string `json:"symbols"`
+}
+
+func (h *Handler) compare(w http.ResponseWriter, r *http.Request) error {
+	req, err := httpx.Decode[compareRequest](w, r)
+	if err != nil {
+		return err
+	}
+	res, err := h.svc.Compare(r.Context(), h.userID(r.Context()), req.Symbols)
+	if err != nil {
+		return mapErr(err)
+	}
+	httpx.OK(w, http.StatusOK, "Product comparison fetched", res)
+	return nil
+}
+
+func (h *Handler) suitability(w http.ResponseWriter, r *http.Request) error {
+	items, err := h.svc.Suitability(r.Context(), h.userID(r.Context()), 20)
+	if err != nil {
+		return err
+	}
+	httpx.OK(w, http.StatusOK, "Suitability records fetched", map[string]any{"items": items})
 	return nil
 }
