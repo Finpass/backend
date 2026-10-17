@@ -43,10 +43,13 @@ func clampI(v, lo, hi int64) int64 { return max(lo, min(hi, v)) }
 
 func ptr(v int64) *int64 { return &v }
 
+// comma1 renders one decimal with the Indonesian separator; Rp amounts keep their own thousand dots.
+func comma1(v float64) string { return strings.Replace(fmt.Sprintf("%.1f", v), ".", ",", 1) }
+
 func months(p Profile) float64 { return math.Round(p.EmergencyMonths*10) / 10 }
 
 var goalNames = map[string]Text{
-	"emergency_fund": {"dana darurat", "emergency fund"}, "home_purchase": {"membeli rumah", "buying a home"},
+	"emergency_fund": {"dana darurat", "emergency fund"}, "home_purchase": {"membeli rumah", "home purchase"},
 	"retirement": {"dana pensiun", "retirement"}, "children_education": {"pendidikan anak", "children's education"},
 	"hajj_umrah": {"haji/umrah", "hajj/umrah"}, "marriage": {"pernikahan", "marriage"}, "wealth_growth": {"pertumbuhan kekayaan", "wealth growth"},
 }
@@ -62,10 +65,10 @@ func buildNudge(p Profile, key string) (Nudge, bool) {
 		now := fmt.Sprintf("%.1f", months(p))
 		if p.EmergencyMonths < 1 {
 			return Nudge{key, Text{"Mulai dari kecil: sisihkan " + Rp(amt) + " minggu ini untuk dana darurat.", "Start small: set aside " + Rp(amt) + " this week for your emergency fund."},
-				Text{fmt.Sprintf("Dana darurat Anda kurang dari 1 bulan. Target: %.1f bulan.", target), fmt.Sprintf("Your emergency fund covers less than 1 month. Target: %.1f months.", target)}, ptr(amt)}, true
+				Text{fmt.Sprintf("Dana darurat Anda kurang dari 1 bulan. Target: %s bulan.", comma1(target)), fmt.Sprintf("Your emergency fund covers less than 1 month. Target: %.1f months.", target)}, ptr(amt)}, true
 		}
 		return Nudge{key, Text{"Sisihkan " + Rp(amt) + " minggu ini untuk dana darurat.", "Set aside " + Rp(amt) + " this week for your emergency fund."},
-			Text{fmt.Sprintf("Dana darurat Anda %s bulan. Target: %.1f bulan.", now, target), fmt.Sprintf("Your emergency fund covers %s months. Target: %.1f months.", now, target)}, ptr(amt)}, true
+			Text{fmt.Sprintf("Dana darurat Anda %s bulan. Target: %s bulan.", strings.Replace(now, ".", ",", 1), comma1(target)), fmt.Sprintf("Your emergency fund covers %s months. Target: %.1f months.", now, target)}, ptr(amt)}, true
 	case "debt":
 		if p.Installment <= 0 {
 			return Nudge{}, false
@@ -76,7 +79,7 @@ func buildNudge(p Profile, key string) (Nudge, bool) {
 			pct = float64(p.Installment) / float64(p.Income) * 100
 		}
 		return Nudge{key, Text{"Bayar tambahan " + Rp(amt) + " ke utang berbunga tertinggi.", "Pay an extra " + Rp(amt) + " toward your highest-interest debt."},
-			Text{fmt.Sprintf("Cicilan Anda %.1f%% dari penghasilan.", pct), fmt.Sprintf("Your installments are %.1f%% of income.", pct)}, ptr(amt)}, true
+			Text{fmt.Sprintf("Cicilan Anda %s%% dari penghasilan.", comma1(pct)), fmt.Sprintf("Your installments are %.1f%% of income.", pct)}, ptr(amt)}, true
 	case "learning":
 		return Nudge{key, Text{"Luangkan 10 menit untuk belajar satu konsep keuangan dasar.", "Spend 10 minutes learning one basic financial concept."},
 			Text{fmt.Sprintf("Skor pengetahuan keuangan Anda %.0f/100.", p.Health.Wisdom), fmt.Sprintf("Your financial wisdom score is %.0f/100.", p.Health.Wisdom)}, nil}, true
@@ -108,7 +111,7 @@ func buildNudge(p Profile, key string) (Nudge, bool) {
 			}
 		}
 		return Nudge{key, Text{"Tingkatkan investasi bulanan.", "Increase your monthly investment."},
-			Text{fmt.Sprintf("Anda investasi %.1f%% dari income. Target: 20%%. Tambah %s/bulan.", ratio, Rp(add)), fmt.Sprintf("You invest %.1f%% of income. Target: 20%%. Add %s/month.", ratio, Rp(add))}, ptr(add)}, true
+			Text{fmt.Sprintf("Anda investasi %s%% dari income. Target: 20%%. Tambah %s/bulan.", comma1(ratio), Rp(add)), fmt.Sprintf("You invest %.1f%% of income. Target: 20%%. Add %s/month.", ratio, Rp(add))}, ptr(add)}, true
 	case "goal":
 		g, ok := goalNames[p.Goal]
 		if !ok {
