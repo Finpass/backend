@@ -107,20 +107,20 @@ func TestBuildHomeWithHoldings(t *testing.T) {
 }
 
 func TestBuildPortfolioEmptyAndYtd(t *testing.T) {
-	e := BuildPortfolio("Dinda", Snapshot{}, "6M", today)
+	e := BuildPortfolio("Dinda", Snapshot{}, "6M", today, 0)
 	if e.Holdings == nil || e.Performance.Points == nil || len(e.Summary) != 4 || e.Footer.Count != 0 || e.Kpis.TotalAssets.Value != 0 || len(e.Kpis.TotalAssets.Sparkline) != 12 {
 		t.Fatalf("%+v", e)
 	}
 	// held since before the year: value 100 -> 150 on constant cost 100 => ytd +50%
 	hist := []DayPoint{{d("2025-12-31"), 100, 100}, {d("2026-09-16"), 140, 100}, {d("2026-10-16"), 150, 100}}
 	snap := Snapshot{Holdings: []Holding{{Value: 150, Cost: 100, Divs: 7}}, History: hist}
-	pg := BuildPortfolio("x", snap, "1M", today)
+	pg := BuildPortfolio("x", snap, "1M", today, 0)
 	if pg.Kpis.ReturnYtd.Value != 50 || pg.Kpis.UnrealizedPnl.Value != 50 || pg.Kpis.TotalAssets.Value != 150 || pg.Footer.DividendsAccumulated != 7 {
 		t.Fatalf("%+v", pg.Kpis)
 	}
 	// holding bought in March at cost 100, worth 120 now: ytd equals its total return
 	hist = []DayPoint{{d("2026-01-01"), 0, 0}, {d("2026-03-02"), 100, 100}, {d("2026-10-16"), 120, 100}}
-	pg = BuildPortfolio("x", Snapshot{Holdings: []Holding{{Value: 120, Cost: 100}}, History: hist}, "ALL", today)
+	pg = BuildPortfolio("x", Snapshot{Holdings: []Holding{{Value: 120, Cost: 100}}, History: hist}, "ALL", today, 0)
 	if pg.Kpis.ReturnYtd.Value != 20 {
 		t.Fatalf("ytd %v", pg.Kpis.ReturnYtd.Value)
 	}
@@ -145,5 +145,33 @@ func TestRanges(t *testing.T) {
 	}
 	if got := HistoryFrom(today.AddDate(0, -1, 0), today, true); got != d("2026-01-01") {
 		t.Errorf("ytd base %v", got)
+	}
+}
+
+func TestPortfolioCashCountsTowardAssetsOnly(t *testing.T) {
+	hs := []Holding{{ID: "h1", Value: 300, Cost: 200}, {ID: "h2", Value: 100, Cost: 100}}
+	snap := Snapshot{Holdings: hs, History: []DayPoint{{Date: today.AddDate(0, -1, 0), Value: 350, Cost: 300}, {Date: today, Value: 400, Cost: 300}}}
+	with := BuildPortfolio("x", snap, "1M", today, 600)
+	without := BuildPortfolio("x", snap, "1M", today, 0)
+	if with.Kpis.TotalAssets.Value != 1000 || without.Kpis.TotalAssets.Value != 400 {
+		t.Errorf("total assets %v / %v", with.Kpis.TotalAssets.Value, without.Kpis.TotalAssets.Value)
+	}
+	if with.Kpis.TotalCost.Value != without.Kpis.TotalCost.Value || with.Kpis.UnrealizedPnl.Value != without.Kpis.UnrealizedPnl.Value || with.Kpis.ReturnYtd.Value != without.Kpis.ReturnYtd.Value {
+		t.Error("cost, profit and return must not change with cash")
+	}
+	if len(with.Holdings) != 3 || !with.Holdings[2].IsCash || with.Holdings[2].MarketValue != 600 || with.Holdings[2].WeightPct != 60 {
+		t.Errorf("cash row: %+v", with.Holdings)
+	}
+	if with.Holdings[0].WeightPct != 30 || with.Holdings[1].WeightPct != 10 {
+		t.Errorf("weights must be over total assets: %v %v", with.Holdings[0].WeightPct, with.Holdings[1].WeightPct)
+	}
+	if with.Footer.Count != 2 {
+		t.Errorf("footer counts investments only, got %d", with.Footer.Count)
+	}
+	if got := BuildPortfolio("x", Snapshot{}, "1M", today, 500); len(got.Holdings) != 1 || got.Kpis.TotalAssets.Value != 500 {
+		t.Errorf("cash alone still shows: %+v", got.Holdings)
+	}
+	if without.Holdings[0].IsCash || len(without.Holdings) != 2 {
+		t.Error("no cash, no cash row")
 	}
 }

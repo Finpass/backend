@@ -138,6 +138,27 @@ func sum(hs []Holding) (value, cost, divs float64) {
 	return
 }
 
+// withCash returns the holdings as page rows with weights over total assets (investments + cash), cash last.
+func withCash(h []Holding, cash int64) []HoldingRow {
+	out := make([]HoldingRow, 0, len(h)+1)
+	total := float64(cash)
+	for _, x := range h {
+		total += x.Value
+	}
+	for _, x := range h {
+		if total > 0 {
+			x.WeightPct = math.Round(x.Value/total*1000) / 10
+		}
+		out = append(out, HoldingRow{Holding: x})
+	}
+	if cash > 0 {
+		c := cashHolding(cash)
+		c.WeightPct = math.Round(float64(cash)/total*1000) / 10
+		out = append(out, HoldingRow{Holding: c, IsCash: true})
+	}
+	return out
+}
+
 func holdingsOrEmpty(h []Holding) []Holding {
 	if h == nil {
 		return []Holding{}
@@ -218,12 +239,23 @@ func ytdPct(h []DayPoint, d time.Time) float64 {
 	return pct(gain, v0+(cur.Cost-c0))
 }
 
+// cashHolding is the profile's liquid savings as a portfolio row: no market price, so value equals cost and it never moves.
+func cashHolding(amount int64) Holding {
+	return Holding{
+		ID: "cash", Name: "Kas", Subtitle: "Tabungan likuid", AssetClass: "cash", AssetClassLabelID: "Kas", AssetClassLabelEn: "Cash",
+		Currency: "IDR", Units: 1, AvgCost: float64(amount), LastPrice: float64(amount), MarketValue: amount, CostBasis: amount,
+		Trend1y: []float64{}, Value: float64(amount), Cost: float64(amount),
+	}
+}
+
 // BuildPortfolio assembles the portfolio page. History must reach back to HistoryFrom(start, today, true).
-func BuildPortfolio(name string, snap Snapshot, rng string, today time.Time) PortfolioPage {
+// cash (liquid savings from the profile) counts toward total assets, weights and allocation only: cost, profit and
+// return describe the investments, so idle cash does not dilute them.
+func BuildPortfolio(name string, snap Snapshot, rng string, today time.Time, cash int64) PortfolioPage {
 	var pg PortfolioPage
 	start, _ := PortfolioStart(rng, today)
 	pg.Name = name
-	pg.Holdings = holdingsOrEmpty(snap.Holdings)
+	pg.Holdings = withCash(snap.Holdings, cash)
 	hist := snap.History
 	if rng == "ALL" {
 		hist = trimLeadingEmpty(hist)
@@ -246,7 +278,8 @@ func BuildPortfolio(name string, snap Snapshot, rng string, today time.Time) Por
 		return out
 	}
 	ytdNow, ytdPrev := ytdPct(hist, today), ytdPct(hist, month)
-	pg.Kpis.TotalAssets = K{Value: math.Round(val), ChangePct: pct(val-m.Value, m.Value), Sparkline: sp(func(p DayPoint) float64 { return p.Value })}
+	c := float64(cash)
+	pg.Kpis.TotalAssets = K{Value: math.Round(val + c), ChangePct: pct(val-m.Value, m.Value+c), Sparkline: sp(func(p DayPoint) float64 { return p.Value + c })}
 	pg.Kpis.TotalCost = K{Value: math.Round(cost), ChangePct: pct(cost-m.Cost, m.Cost), Sparkline: sp(func(p DayPoint) float64 { return p.Cost })}
 	prevPnl := m.Value - m.Cost
 	pg.Kpis.UnrealizedPnl = K{Value: math.Round(pnl), ChangePct: pct(pnl-prevPnl, math.Abs(prevPnl)), Sparkline: sp(func(p DayPoint) float64 { return p.Value - p.Cost })}
@@ -257,7 +290,7 @@ func BuildPortfolio(name string, snap Snapshot, rng string, today time.Time) Por
 		pg.Performance.Points = append(pg.Performance.Points, PerfPoint{Date: p.Date.Format("2006-01-02"), Value: rnd(p.Value), Cost: rnd(p.Cost)})
 	}
 	pg.Summary = []SummaryRow{
-		{Key: "totalAssets", Label: "Total Aset", Value: math.Round(val), Kind: "idr", ChangePct: pg.Kpis.TotalAssets.ChangePct},
+		{Key: "totalAssets", Label: "Total Aset", Value: math.Round(val + c), Kind: "idr", ChangePct: pg.Kpis.TotalAssets.ChangePct},
 		{Key: "totalCost", Label: "Modal Investasi", Value: math.Round(cost), Kind: "idr", ChangePct: pg.Kpis.TotalCost.ChangePct},
 		{Key: "unrealizedPnl", Label: "Keuntungan / Kerugian", Value: math.Round(pnl), Kind: "idr", ChangePct: pg.Kpis.UnrealizedPnl.ChangePct},
 		{Key: "returnYtd", Label: "Return (YTD)", Value: ytdNow, Kind: "percent", ChangePct: pg.Kpis.ReturnYtd.ChangePct},

@@ -77,5 +77,9 @@ func (s *Service) Portfolio(ctx context.Context, userID, rng string) (domain.Por
 	if err != nil {
 		return domain.PortfolioPage{}, err
 	}
-	return domain.BuildPortfolio(prof.FirstName, snap, rng, today), nil
+	var cash int64
+	if prof.Status == "completed" {
+		cash = prof.Savings
+	}
+	return domain.BuildPortfolio(prof.FirstName, snap, rng, today, cash), nil
 }

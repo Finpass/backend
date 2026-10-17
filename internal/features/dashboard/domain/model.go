@@ -37,6 +37,12 @@ type Holding struct {
 	Divs  float64 `json:"-"`
 }
 
+// HoldingRow is a row of the portfolio page: a holding, or the profile's cash (edited through the profile).
+type HoldingRow struct {
+	Holding
+	IsCash bool `json:"isCash"`
+}
+
 type DayPoint struct {
 	Date  time.Time
 	Value float64
@@ -171,7 +177,7 @@ type PortfolioPage struct {
 		Points []PerfPoint `json:"points"`
 	} `json:"performance"`
 	Summary  []SummaryRow `json:"summary"`
-	Holdings []Holding    `json:"holdings"`
+	Holdings []HoldingRow `json:"holdings"`
 	Footer   struct {
 		Count                int   `json:"count"`
 		Unrealized           int64 `json:"unrealized"`
