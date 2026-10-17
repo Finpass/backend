@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"math"
+	"sort"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -16,6 +18,9 @@ import (
 	marketinfra "shenzen/backend/internal/features/market/infrastructure"
 	matchapp "shenzen/backend/internal/features/matching/application"
 	matchdomain "shenzen/backend/internal/features/matching/domain"
+	newsapp "shenzen/backend/internal/features/news/application"
+	newsdomain "shenzen/backend/internal/features/news/domain"
+	newsinfra "shenzen/backend/internal/features/news/infrastructure"
 	pfapp "shenzen/backend/internal/features/portfolio/application"
 	pfdomain "shenzen/backend/internal/features/portfolio/domain"
 	pfinfra "shenzen/backend/internal/features/portfolio/infrastructure"
@@ -32,6 +37,7 @@ func mountAdvisory(r chi.Router, d Deps, authH *authhttp.Handler) {
 	svc := advapp.NewService(advapp.Deps{
 		Store:    advinfra.NewStore(d.Pool),
 		Contexts: contextBuilder{profiles: profileBridge{profileinfra.NewRepo(d.Pool)}, matching: matching(d), portfolio: pf},
+		News:     newsBridge{svc: newsapp.NewService(newsFeed{market.repo}, newsinfra.NewRepo(d.Pool), pf)},
 		AI:       advinfra.NewAI(aiclient.New(d.Config.AIServiceURL, d.Config.AIInternalKey, aiChatTimeout)),
 		NewID:    newUUID, Now: time.Now,
 	})
@@ -45,7 +51,7 @@ type contextBuilder struct {
 	portfolio *pfapp.Service
 }
 
-func (b contextBuilder) Build(ctx context.Context, userID string) (advdomain.UserContext, error) {
+func (b contextBuilder) Build(ctx context.Context, userID string, compare []string) (advdomain.UserContext, error) {
 	p, err := b.profiles.Profile(ctx, userID)
 	if errors.Is(err, matchdomain.ErrNoProfile) {
 		return advdomain.UserContext{}, advdomain.ErrNoProfile
@@ -64,13 +70,38 @@ func (b contextBuilder) Build(ctx context.Context, userID string) (advdomain.Use
 	if snap, err := b.portfolio.Snapshot(ctx, userID, time.Time{}); err == nil { // holdings are context, not a precondition
 		hs = snap.Holdings
 	}
-	return buildUserContext(p, prod, hs), nil
+	uc := buildUserContext(p, prod, hs)
+	if len(compare) > 0 {
+		if cmp, err := b.matching.Compare(ctx, userID, compare); err == nil {
+			uc.Comparison = compareFacts(cmp)
+		} else {
+			slog.WarnContext(ctx, "advisory: comparison unavailable", "err", err) // the question is still answered, without it
+		}
+	}
+	return uc, nil
+}
+
+func compareFacts(c matchapp.CompareResult) []advdomain.CompareFact {
+	out := make([]advdomain.CompareFact, 0, len(c.Assets))
+	for _, a := range c.Assets {
+		out = append(out, advdomain.CompareFact{
+			Symbol: a.Symbol, Name: a.Name, Class: a.Class, Eligible: a.Gate.Eligible, Gate: a.Gate.Gate, Score: a.Score.Total, Rank: a.Rank,
+			Return1Y: a.Metrics.Return1Y, Volatility: a.Metrics.Volatility, Sharpe: a.Metrics.Sharpe, DivYield: a.Metrics.DivYield, PER: a.Metrics.PER, PBV: a.Metrics.PBV,
+		})
+	}
+	return out
 }
 
 // buildUserContext maps facts only: it never reads Profile.Name, and no email or phone is available to it.
 func buildUserContext(p matchdomain.Profile, prod matchapp.ProductResult, hs []pfdomain.HoldingView) advdomain.UserContext {
 	uc := advdomain.UserContext{
-		Profile:  advdomain.ProfileFacts{RiskProfile: p.Risk, LadderLevel: p.Ladder, Sharia: p.Sharia, HorizonYears: p.HorizonYears()},
+		Profile: advdomain.ProfileFacts{
+			RiskProfile: p.Risk, LadderLevel: p.Ladder, Sharia: p.Sharia, HorizonYears: p.HorizonYears(), GoalAmount: p.GoalAmount,
+			Income: p.Income, Expenses: p.Expenses, Surplus: p.Surplus, Installment: p.Installment, Savings: p.Savings, Investable: p.Investable,
+			Dependents: p.Dependents, Employment: p.Employment, Knowledge: p.Knowledge,
+			HeldKinds: orEmpty(p.HeldKinds), Priorities: orEmpty(p.Priorities),
+			EmergencyMonths: p.EmergencyMonths, EmergencyTargetMonths: p.EmergencyTargetMax, HealthCategory: p.Health.Category, HealthScore: p.Health.Total,
+		},
 		Holdings: []advdomain.HoldingFact{}, Recommended: []advdomain.ClassFact{},
 	}
 	if p.Goal != "" && p.Goal != "none" {
@@ -82,7 +113,7 @@ func buildUserContext(p matchdomain.Profile, prod matchapp.ProductResult, hs []p
 		total += h.MarketValue
 	}
 	for _, h := range hs {
-		f := advdomain.HoldingFact{Name: h.Name, AssetClass: h.AssetClass}
+		f := advdomain.HoldingFact{Name: h.Name, AssetClass: h.AssetClass, ValueIDR: h.MarketValue}
 		if h.Symbol != nil {
 			f.Symbol = *h.Symbol
 		}
@@ -99,6 +130,33 @@ func buildUserContext(p matchdomain.Profile, prod matchapp.ProductResult, hs []p
 		uc.Recommended = append(uc.Recommended, cf)
 	}
 	return uc
+}
+
+func orEmpty(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+// newsBridge offers the advisor the latest articles, those touching the user's holdings first.
+type newsBridge struct{ svc *newsapp.Service }
+
+func (b newsBridge) Latest(ctx context.Context, userID string, limit int) ([]advdomain.NewsFact, error) {
+	feed, err := b.svc.List(ctx, userID, newsdomain.Filter{Category: "all", Limit: 30})
+	if err != nil {
+		return nil, err
+	}
+	items := feed.Items
+	sort.SliceStable(items, func(i, j int) bool { return items[i].RelevantToHoldings && !items[j].RelevantToHoldings })
+	out := make([]advdomain.NewsFact, 0, limit)
+	for _, a := range items {
+		if len(out) == limit {
+			break
+		}
+		out = append(out, advdomain.NewsFact{Title: a.Title, Source: a.Source, URL: a.URL, PublishedAt: a.PublishedAt, Summary: a.Summary})
+	}
+	return out, nil
 }
 
 // newUUID returns a random v4 UUID (chat_sessions.id is a uuid column).

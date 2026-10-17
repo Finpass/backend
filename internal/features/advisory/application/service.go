@@ -16,12 +16,14 @@ import (
 const (
 	rateLimit  = 20
 	rateWindow = time.Minute
+	newsLimit  = 5 // articles offered to the advisor per question
 )
 
 type Deps struct {
 	Store    domain.Store
 	Contexts domain.Contexts
 	AI       domain.AI
+	News     domain.News   // optional: without it the advisor answers from documents only
 	NewID    func() string // uuid
 	Now      func() time.Time
 }
@@ -82,7 +84,20 @@ func (s *Service) Turns(ctx context.Context, userID, runID string, since int) ([
 	return out, err
 }
 
+// Context is everything the advisor knows about the user, shown to them as is. News is not part of it.
+func (s *Service) Context(ctx context.Context, userID string) (domain.UserContext, error) {
+	return s.d.Contexts.Build(ctx, userID, nil)
+}
+
 func (s *Service) Chat(ctx context.Context, userID, sessionID, message, lang, runID string) (Reply, error) {
+	return s.ChatAbout(ctx, userID, sessionID, message, lang, runID, nil)
+}
+
+// ChatAbout is Chat with products the user wants compared; their rule results join the advisor's context.
+func (s *Service) ChatAbout(ctx context.Context, userID, sessionID, message, lang, runID string, compare []string) (Reply, error) {
+	if len(compare) == 1 || len(compare) > domain.MaxCompare {
+		return Reply{}, apperr.Validation(apperr.Detail{Field: "compare", Message: "pick 2 to 4 products"})
+	}
 	message = strings.TrimSpace(message)
 	if n := len([]rune(message)); n < 1 || n > domain.MaxMessage {
 		return Reply{}, apperr.Validation(apperr.Detail{Field: "message", Message: "must be 1 to 1000 characters"})
@@ -93,9 +108,16 @@ func (s *Service) Chat(ctx context.Context, userID, sessionID, message, lang, ru
 	if !s.allow(userID) {
 		return Reply{}, apperr.New(apperr.TooManyRequests, "Too many messages, try again in a minute")
 	}
-	uc, err := s.d.Contexts.Build(ctx, userID) // before any write: no profile must not leave an empty session behind
+	uc, err := s.d.Contexts.Build(ctx, userID, compare) // before any write: no profile must not leave an empty session behind
 	if err != nil {
 		return Reply{}, err
+	}
+	if s.d.News != nil {
+		if items, err := s.d.News.Latest(ctx, userID, newsLimit); err == nil {
+			uc.News = items
+		} else {
+			slog.WarnContext(ctx, "advisory: news unavailable", "err", err) // answered from documents instead
+		}
 	}
 	now := s.d.Now()
 	if sessionID == "" {

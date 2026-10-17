@@ -29,6 +29,7 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Use(h.auth)
 		r.Method(http.MethodPost, "/chat", httpx.HandlerFunc(h.chat))
 		r.Method(http.MethodGet, "/runs/{runId}/turns", httpx.HandlerFunc(h.turns))
+		r.Method(http.MethodGet, "/context", httpx.HandlerFunc(h.context))
 		r.Method(http.MethodGet, "/sessions", httpx.HandlerFunc(h.sessions))
 		r.Method(http.MethodGet, "/sessions/{id}", httpx.HandlerFunc(h.session))
 		r.Method(http.MethodDelete, "/sessions/{id}", httpx.HandlerFunc(h.remove))
@@ -36,10 +37,11 @@ func (h *Handler) Routes(r chi.Router) {
 }
 
 type chatBody struct {
-	SessionID string `json:"sessionId" validate:"omitempty,uuid"`
-	Message   string `json:"message" validate:"required,min=1,max=1000"`
-	Lang      string `json:"lang" validate:"required,oneof=id en"`
-	RunID     string `json:"runId" validate:"omitempty,uuid"`
+	SessionID string   `json:"sessionId" validate:"omitempty,uuid"`
+	Message   string   `json:"message" validate:"required,min=1,max=1000"`
+	Lang      string   `json:"lang" validate:"required,oneof=id en"`
+	RunID     string   `json:"runId" validate:"omitempty,uuid"`
+	Compare   []string `json:"compare" validate:"omitempty,max=4,dive,min=1,max=24"`
 }
 
 func (h *Handler) chat(w http.ResponseWriter, r *http.Request) error {
@@ -47,11 +49,20 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	out, err := h.svc.Chat(r.Context(), h.userID(r.Context()), b.SessionID, b.Message, b.Lang, b.RunID)
+	out, err := h.svc.ChatAbout(r.Context(), h.userID(r.Context()), b.SessionID, b.Message, b.Lang, b.RunID, b.Compare)
 	if err != nil {
 		return err
 	}
 	httpx.OK(w, http.StatusOK, "Answer generated", out)
+	return nil
+}
+
+func (h *Handler) context(w http.ResponseWriter, r *http.Request) error {
+	uc, err := h.svc.Context(r.Context(), h.userID(r.Context()))
+	if err != nil {
+		return err
+	}
+	httpx.OK(w, http.StatusOK, "Context fetched", uc)
 	return nil
 }
 

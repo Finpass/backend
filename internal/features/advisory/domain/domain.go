@@ -17,6 +17,7 @@ var (
 const (
 	HistoryWindow = 6 // messages sent to the AI service
 	MaxMessage    = 1000
+	MaxCompare    = 4 // products attached to one question
 	SessionLimit  = 50
 	TitleLen      = 60
 )
@@ -27,6 +28,7 @@ type Citation struct {
 	Page       *int   `json:"page"`
 	SourceType string `json:"sourceType"`
 	Key        string `json:"key"`
+	URL        string `json:"url,omitempty"` // set for news, so the UI can link the source
 }
 
 // TurnEvent is one user-facing progress step of a reply ("Searching sources...").
@@ -58,6 +60,34 @@ type UserContext struct {
 	Profile     ProfileFacts  `json:"profile"`
 	Holdings    []HoldingFact `json:"holdings"`
 	Recommended []ClassFact   `json:"recommended"`
+	Comparison  []CompareFact `json:"comparison"` // products the user asked to compare; empty otherwise
+	News        []NewsFact    `json:"news"`       // recent articles the advisor may cite when documents fall short
+}
+
+// NewsFact is one market article offered to the advisor as a source.
+type NewsFact struct {
+	Title       string `json:"title"`
+	Source      string `json:"source"`
+	URL         string `json:"url"`
+	PublishedAt string `json:"publishedAt"`
+	Summary     string `json:"summary"`
+}
+
+// CompareFact is the rule outcome for one compared product; the advisor may explain it but never change it.
+type CompareFact struct {
+	Symbol     string   `json:"symbol"`
+	Name       string   `json:"name"`
+	Class      string   `json:"class"`
+	Eligible   bool     `json:"eligible"`
+	Gate       string   `json:"gate,omitempty"`
+	Score      float64  `json:"score"`
+	Rank       int      `json:"rank"`
+	Return1Y   float64  `json:"return1y"`
+	Volatility float64  `json:"volatility"`
+	Sharpe     *float64 `json:"sharpe"`
+	DivYield   *float64 `json:"divYield"`
+	PER        *float64 `json:"per"`
+	PBV        *float64 `json:"pbv"`
 }
 
 type ProfileFacts struct {
@@ -66,6 +96,24 @@ type ProfileFacts struct {
 	Sharia       string  `json:"sharia"`
 	HorizonYears float64 `json:"horizonYears"`
 	Goal         *string `json:"goal"`
+	GoalAmount   int64   `json:"goalAmountIDR,omitempty"`
+
+	Income      int64    `json:"incomeIDR"`
+	Expenses    int64    `json:"expensesIDR"`
+	Surplus     int64    `json:"surplusIDR"`
+	Installment int64    `json:"installmentIDR"`
+	Savings     int64    `json:"savingsIDR"`
+	Investable  int64    `json:"investableIDR"`
+	Dependents  int      `json:"dependents"`
+	Employment  string   `json:"employment,omitempty"`
+	Knowledge   string   `json:"knowledge,omitempty"`
+	HeldKinds   []string `json:"heldKinds"`
+	Priorities  []string `json:"priorities"`
+
+	EmergencyMonths       float64 `json:"emergencyMonths"`
+	EmergencyTargetMonths float64 `json:"emergencyTargetMonths"`
+	HealthCategory        string  `json:"healthCategory,omitempty"`
+	HealthScore           float64 `json:"healthScore"`
 }
 
 type HoldingFact struct {
@@ -73,6 +121,7 @@ type HoldingFact struct {
 	Name       string  `json:"name"`
 	AssetClass string  `json:"assetClass"`
 	WeightPct  float64 `json:"weightPct"`
+	ValueIDR   int64   `json:"valueIDR"`
 }
 
 type ClassFact struct {
@@ -122,7 +171,12 @@ type Store interface {
 
 // Contexts assembles the user context; it returns ErrNoProfile when the profile is not completed.
 type Contexts interface {
-	Build(ctx context.Context, userID string) (UserContext, error)
+	Build(ctx context.Context, userID string, compare []string) (UserContext, error)
+}
+
+// News offers recent market articles for one user, holdings-related first.
+type News interface {
+	Latest(ctx context.Context, userID string, limit int) ([]NewsFact, error)
 }
 
 type AI interface {

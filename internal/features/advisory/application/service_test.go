@@ -93,7 +93,7 @@ func (s *store) Delete(_ context.Context, u, id string) (bool, error) {
 
 type ctxs struct{ err error }
 
-func (c ctxs) Build(context.Context, string) (domain.UserContext, error) {
+func (c ctxs) Build(context.Context, string, []string) (domain.UserContext, error) {
 	return domain.UserContext{Profile: domain.ProfileFacts{RiskProfile: "Moderate"}}, c.err
 }
 
@@ -230,5 +230,37 @@ func TestRunIDIsNamespacedByUserAndTurnsStored(t *testing.T) {
 	}
 	if !strings.Contains(string(st.lastTrace), `"turns"`) || !strings.Contains(string(st.lastTrace), "Mencari...") {
 		t.Errorf("turns not stored with the message: %s", st.lastTrace)
+	}
+}
+
+type newsFeed struct{ err error }
+
+func (n newsFeed) Latest(context.Context, string, int) ([]domain.NewsFact, error) {
+	return []domain.NewsFact{{Title: "BBCA laba naik", URL: "https://n.example/1"}}, n.err
+}
+
+func TestNewsReachesTheAIAndAFailureDoesNotBlockTheAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want int
+	}{{nil, 1}, {errors.New("feed down"), 0}} {
+		a := &ai{}
+		st := &store{}
+		svc := application.NewService(application.Deps{Store: st, Contexts: ctxs{}, AI: a, News: newsFeed{tc.err},
+			NewID: func() string { return "s1" }, Now: time.Now})
+		if _, err := svc.Chat(context.Background(), "u1", "", "kabar BBCA?", "id", ""); err != nil {
+			t.Fatal(err)
+		}
+		if got := len(a.got.UserContext.News); got != tc.want {
+			t.Fatalf("news %d, want %d", got, tc.want)
+		}
+	}
+}
+
+func TestContextHasNoNews(t *testing.T) {
+	svc, _, _ := setup(ctxs{}, &ai{})
+	uc, err := svc.Context(context.Background(), "u1")
+	if err != nil || uc.Profile.RiskProfile != "Moderate" || len(uc.News) != 0 {
+		t.Fatalf("%+v %v", uc, err)
 	}
 }

@@ -32,7 +32,7 @@ func (store) Delete(context.Context, string, string) (bool, error)            { 
 
 type ctxs struct{}
 
-func (ctxs) Build(context.Context, string) (domain.UserContext, error) {
+func (ctxs) Build(context.Context, string, []string) (domain.UserContext, error) {
 	return domain.UserContext{}, nil
 }
 
