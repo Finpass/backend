@@ -51,6 +51,7 @@ type ProductTrace struct {
 	GatesApplied     []GateCount           `json:"gatesApplied"`
 	GateNotes        []string              `json:"gateNotes"`
 	Exclusions       []Exclusion           `json:"exclusions"`
+	Shortlist        []ShortlistTrace      `json:"shortlist"`
 	ScoresPerAsset   map[string]ScoreTrace `json:"scoresPerAsset"`
 	Diversification  []string              `json:"diversificationActions"`
 }
@@ -78,7 +79,7 @@ func Match(p Profile, cands []Candidate, holdings []Holding, riskFree float64, m
 	out := ProductOutput{Portfolio: []ProductClass{}, Flags: []Flag{}}
 	at := TargetAllocation(p)
 	out.Investable = at.Investable
-	out.Trace = ProductTrace{TargetAllocation: at, GateNotes: GateNotesFor(), Exclusions: []Exclusion{}, ScoresPerAsset: map[string]ScoreTrace{}, Diversification: []string{}, GatesApplied: []GateCount{}}
+	out.Trace = ProductTrace{TargetAllocation: at, GateNotes: GateNotesFor(), Exclusions: []Exclusion{}, Shortlist: []ShortlistTrace{}, ScoresPerAsset: map[string]ScoreTrace{}, Diversification: []string{}, GatesApplied: []GateCount{}}
 	if !at.Investable {
 		out.Flags = append(out.Flags, Flag{"no_investment_allocation", Text{
 			"Level tangga keuangan Anda masih 1-2: fokus dulu pada dana darurat dan utang, produk investasi belum direkomendasikan.",
@@ -98,7 +99,7 @@ func Match(p Profile, cands []Candidate, holdings []Holding, riskFree float64, m
 
 	// layers 2 and 3
 	counts := map[string]int{}
-	byClass := map[string][]scored{}
+	passed := map[string][]Candidate{}
 	for _, c := range cands {
 		if at.Target[c.Class] <= 0 {
 			continue
@@ -108,9 +109,19 @@ func Match(p Profile, cands []Candidate, holdings []Holding, riskFree float64, m
 			out.Trace.Exclusions = append(out.Trace.Exclusions, Exclusion{c.Symbol, g, why})
 			continue
 		}
-		s := Score(p, c, riskFree, macro)
-		out.Trace.ScoresPerAsset[c.Symbol] = s
-		byClass[c.Class] = append(byClass[c.Class], scored{c, s})
+		passed[c.Class] = append(passed[c.Class], c)
+	}
+	// rerank cheaply first, then run the full score on the top ShortlistSize per class only
+	byClass := map[string][]scored{}
+	for _, cl := range sortedKeys(passed) {
+		eligible := len(passed[cl])
+		keep := shortlist(passed[cl], riskFree)
+		out.Trace.Shortlist = append(out.Trace.Shortlist, ShortlistTrace{cl, eligible, len(keep)})
+		for _, c := range keep {
+			s := Score(p, c, riskFree, macro)
+			out.Trace.ScoresPerAsset[c.Symbol] = s
+			byClass[cl] = append(byClass[cl], scored{c, s})
+		}
 	}
 	for _, g := range sortedKeys(counts) {
 		out.Trace.GatesApplied = append(out.Trace.GatesApplied, GateCount{g, counts[g]})
