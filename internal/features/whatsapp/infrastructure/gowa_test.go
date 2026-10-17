@@ -45,7 +45,7 @@ func fakeGoWA(t *testing.T, loggedIn bool, sendStatus int) (*httptest.Server, *[
 func TestGoWASend(t *testing.T) {
 	srv, got := fakeGoWA(t, true, 200)
 	defer srv.Close()
-	g := NewGoWA(srv.URL+"/", "admin", "pw")
+	g := NewGoWA(srv.URL+"/", "admin", "pw", "finpass")
 	id, err := g.Send(context.Background(), "+6281234567890", "halo")
 	if err != nil || id != "3EB0ABC" {
 		t.Fatalf("%q %v", id, err)
@@ -58,14 +58,14 @@ func TestGoWASend(t *testing.T) {
 func TestGoWAErrorsAndAuth(t *testing.T) {
 	srv, _ := fakeGoWA(t, true, 400)
 	defer srv.Close()
-	_, err := NewGoWA(srv.URL, "admin", "pw").Send(context.Background(), "+6281234567890", "halo")
+	_, err := NewGoWA(srv.URL, "admin", "pw", "finpass").Send(context.Background(), "+6281234567890", "halo")
 	if err == nil || !strings.Contains(err.Error(), "status 400") {
 		t.Fatalf("%v", err)
 	}
-	if _, err = NewGoWA(srv.URL, "admin", "wrong").Send(context.Background(), "+6281234567890", "x"); err == nil || !strings.Contains(err.Error(), "401") {
+	if _, err = NewGoWA(srv.URL, "admin", "wrong", "finpass").Send(context.Background(), "+6281234567890", "x"); err == nil || !strings.Contains(err.Error(), "401") {
 		t.Errorf("wrong credentials: %v", err)
 	}
-	if _, err = NewGoWA("http://127.0.0.1:1", "", "").Send(context.Background(), "+6281234567890", "x"); err == nil || strings.Contains(err.Error(), "6281234567890") {
+	if _, err = NewGoWA("http://127.0.0.1:1", "", "", "").Send(context.Background(), "+6281234567890", "x"); err == nil || strings.Contains(err.Error(), "6281234567890") {
 		t.Errorf("unreachable gateway error must not carry the phone: %v", err)
 	}
 }
@@ -73,13 +73,28 @@ func TestGoWAErrorsAndAuth(t *testing.T) {
 func TestGoWAConnected(t *testing.T) {
 	for _, logged := range []bool{true, false} {
 		srv, _ := fakeGoWA(t, logged, 200)
-		ok, err := NewGoWA(srv.URL, "admin", "pw").Connected(context.Background())
+		ok, err := NewGoWA(srv.URL, "admin", "pw", "finpass").Connected(context.Background())
 		srv.Close()
 		if err != nil || ok != logged {
 			t.Errorf("logged=%v got %v %v", logged, ok, err)
 		}
 	}
-	if _, err := NewGoWA("http://127.0.0.1:1", "", "").Connected(context.Background()); err == nil {
+	if _, err := NewGoWA("http://127.0.0.1:1", "", "", "").Connected(context.Background()); err == nil {
 		t.Error("unreachable")
+	}
+}
+
+func TestGoWASendsDeviceHeader(t *testing.T) {
+	var seen string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Get("X-Device-Id")
+		_, _ = w.Write([]byte(`{"results":{"message_id":"m1"}}`))
+	}))
+	defer srv.Close()
+	if _, err := NewGoWA(srv.URL, "", "", "finpass").Send(context.Background(), "+6281234567890", "x"); err != nil || seen != "finpass" {
+		t.Errorf("device header %q %v", seen, err)
+	}
+	if _, err := NewGoWA(srv.URL, "", "", "").Send(context.Background(), "+6281234567890", "x"); err != nil || seen != "" {
+		t.Errorf("no device configured must send no header: %q %v", seen, err)
 	}
 }

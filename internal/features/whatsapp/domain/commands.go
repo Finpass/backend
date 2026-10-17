@@ -14,6 +14,8 @@ const (
 	CmdProfile  Command = "PROFILE"
 	CmdUpdate   Command = "UPDATE"
 	CmdHelp     Command = "HELP"
+	CmdEnglish  Command = "ENGLISH"
+	CmdIndo     Command = "INDONESIA"
 	CmdQuestion Command = "QUESTION" // routed to the chatbot (Feature 2, not built yet)
 	CmdUnknown  Command = "UNKNOWN"
 )
@@ -22,6 +24,7 @@ var aliases = map[string]Command{
 	"MORE": CmdMore, "LAGI": CmdMore, "STOP": CmdStop, "BERHENTI": CmdStop, "UNSUBSCRIBE": CmdStop,
 	"RESUME": CmdResume, "LANJUT": CmdResume, "START": CmdResume, "PROFILE": CmdProfile, "PROFIL": CmdProfile,
 	"UPDATE": CmdUpdate, "HELP": CmdHelp, "BANTUAN": CmdHelp,
+	"ENGLISH": CmdEnglish, "EN": CmdEnglish, "INGGRIS": CmdEnglish, "INDONESIA": CmdIndo, "ID": CmdIndo, "BAHASA": CmdIndo, "INDONESIAN": CmdIndo,
 }
 
 // ParseCommand reads the reply text. A command is the whole message (ignoring case and punctuation); a longer text with

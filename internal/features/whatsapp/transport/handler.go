@@ -67,6 +67,7 @@ type settingsRequest struct {
 	SendTimeLocal string `json:"sendTimeLocal"`
 	Frequency     string `json:"frequency"`
 	Timezone      string `json:"timezone"`
+	Language      string `json:"language"` // briefing language; empty keeps the saved one
 }
 
 func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) error {
@@ -74,8 +75,14 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	lang := req.Language
+	if lang == "" {
+		lang = locale(r)
+	} else if lang != "id" && lang != "en" {
+		return apperr.Validation(apperr.Detail{Field: "language", Message: "must_be_id_or_en"})
+	}
 	s, err := h.svc.UpdateSettings(r.Context(), h.userID(r.Context()), application.SettingsUpdate{
-		Phone: req.Phone, OptIn: req.OptIn, SendTimeLocal: req.SendTimeLocal, Frequency: req.Frequency, Timezone: req.Timezone, Locale: locale(r)})
+		Phone: req.Phone, OptIn: req.OptIn, SendTimeLocal: req.SendTimeLocal, Frequency: req.Frequency, Timezone: req.Timezone, Locale: lang})
 	if err != nil {
 		return err
 	}

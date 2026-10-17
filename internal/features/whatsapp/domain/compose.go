@@ -111,8 +111,13 @@ func dateText(t time.Time, l string) string {
 	return fmt.Sprintf("%d %s", t.Day(), m[t.Month()-1])
 }
 
-func pct(v float64) string {
-	return strconv.FormatFloat(math.Round(math.Abs(v)*100)/100, 'f', -1, 64)
+// pct formats an absolute change with the decimal separator of the locale (Indonesian uses a comma).
+func pct(v float64, l string) string {
+	s := strconv.FormatFloat(math.Round(math.Abs(v)*100)/100, 'f', -1, 64)
+	if l != "en" {
+		s = strings.Replace(s, ".", ",", 1)
+	}
+	return s
 }
 
 func runes(s string) int { return utf8.RuneCountInString(s) }
@@ -201,13 +206,13 @@ func alertSlot(a Alert, risk, l string) string {
 	default:
 		switch {
 		case a.Repeated && l == "en":
-			parts = []string{fmt.Sprintf("%s is still moving: %s %s%% yesterday, third day in a row.", n, word(a.Direction, l), pct(a.ChangePct))}
+			parts = []string{fmt.Sprintf("%s is still moving: %s %s%% yesterday, third day in a row.", n, word(a.Direction, l), pct(a.ChangePct, l))}
 		case a.Repeated:
-			parts = []string{fmt.Sprintf("%s masih bergerak: %s %s%% kemarin, hari ketiga berturut-turut.", n, word(a.Direction, l), pct(a.ChangePct))}
+			parts = []string{fmt.Sprintf("%s masih bergerak: %s %s%% kemarin, hari ketiga berturut-turut.", n, word(a.Direction, l), pct(a.ChangePct, l))}
 		case l == "en":
-			parts = []string{fmt.Sprintf("%s %s %s%% yesterday.", n, word(a.Direction, l), pct(a.ChangePct))}
+			parts = []string{fmt.Sprintf("%s %s %s%% yesterday.", n, word(a.Direction, l), pct(a.ChangePct, l))}
 		default:
-			parts = []string{fmt.Sprintf("%s %s %s%% kemarin.", n, word(a.Direction, l), pct(a.ChangePct))}
+			parts = []string{fmt.Sprintf("%s %s %s%% kemarin.", n, word(a.Direction, l), pct(a.ChangePct, l))}
 		}
 	}
 	opt := 0
@@ -292,7 +297,7 @@ func macroSlot(m Macro, l string) string {
 		if l == "en" {
 			w = map[bool]string{true: "up", false: "down"}
 		}
-		head = fmt.Sprintf("%s%s %s (%s %s%%).", pre, m.Label.In(l), m.ValueText, w[*m.Change >= 0], pct(*m.Change))
+		head = fmt.Sprintf("%s%s %s (%s %s%%).", pre, m.Label.In(l), m.ValueText, w[*m.Change >= 0], pct(*m.Change, l))
 	case m.ValueText != "":
 		head = fmt.Sprintf("%s%s %s.", pre, m.Label.In(l), m.ValueText)
 	default:
@@ -310,6 +315,10 @@ func nudgeSlot(n Nudge, l string) string {
 }
 
 func greeting(name, l string, date time.Time, newUser bool) string {
+	return "*Finpass*\n" + salutation(name, l, date, newUser)
+}
+
+func salutation(name, l string, date time.Time, newUser bool) string {
 	d := dateText(date, l)
 	switch {
 	case newUser && l == "en":
@@ -448,8 +457,8 @@ func Reply(cmd Command, rc ReplyContext) string {
 		l = "id"
 	}
 	help := map[string]string{
-		"id": "Command yang tersedia:\n- MORE: berita tambahan\n- STOP: pause briefing\n- RESUME: lanjut briefing\n- PROFILE: lihat profil\n- UPDATE: lengkapi profil\n- HELP: bantuan",
-		"en": "Available commands:\n- MORE: more news\n- STOP: pause the briefing\n- RESUME: continue the briefing\n- PROFILE: see your profile\n- UPDATE: complete your profile\n- HELP: help",
+		"id": "Command yang tersedia:\n- MORE: berita tambahan\n- STOP: pause briefing\n- RESUME: lanjut briefing\n- PROFILE: lihat profil\n- UPDATE: lengkapi profil\n- ENGLISH / INDONESIA: ganti bahasa\n- HELP: bantuan",
+		"en": "Available commands:\n- MORE: more news\n- STOP: pause the briefing\n- RESUME: continue the briefing\n- PROFILE: see your profile\n- UPDATE: complete your profile\n- ENGLISH / INDONESIA: change language\n- HELP: help",
 	}[l]
 	switch cmd {
 	case CmdMore:
@@ -485,6 +494,9 @@ func Reply(cmd Command, rc ReplyContext) string {
 		return map[string]string{
 			"id": "Ayo perbarui profil Anda!\nJawaban bisa diperbarui kapan saja di dashboard.\nMulai di sini: " + rc.Link,
 			"en": "Let's update your profile!\nYou can change your answers on the dashboard at any time.\nStart here: " + rc.Link}[l]
+	case CmdEnglish, CmdIndo:
+		// the locale is already switched by the application layer, so the confirmation is in the new language
+		return map[string]string{"id": "Bahasa briefing diubah ke Bahasa Indonesia.\nBalas ENGLISH kapan saja untuk kembali ke bahasa Inggris.", "en": "Briefing language changed to English.\nReply INDONESIA any time to switch back."}[l]
 	case CmdQuestion:
 		return map[string]string{"id": "Fitur tanya jawab belum tersedia di WhatsApp.\n" + help, "en": "Questions are not available on WhatsApp yet.\n" + help}[l]
 	}

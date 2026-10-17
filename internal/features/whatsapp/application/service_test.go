@@ -642,3 +642,36 @@ func TestErase(t *testing.T) {
 		t.Fatal("erase")
 	}
 }
+
+func TestLanguageCommandSwitchesLocaleAndBriefing(t *testing.T) {
+	e := setup()
+	ctx := context.Background()
+	e.verified("u1", "+6281234567890")
+	jid := "6281234567890@s.whatsapp.net"
+	post := func(body []byte) error { return e.svc.HandleWebhook(ctx, body, domain.Sign(secret, body)) }
+	if err := post(hook(jid, "english", "l1")); err != nil {
+		t.Fatal(err)
+	}
+	if e.st.contacts["u1"].Locale != "en" || !strings.Contains(e.snd.out[0].text, "changed to English") {
+		t.Errorf("ENGLISH: %q / %+v", e.st.contacts["u1"].Locale, e.snd.out)
+	}
+	st, err := e.svc.Settings(ctx, "u1")
+	if err != nil || st.Language != "en" {
+		t.Errorf("settings must expose the language: %+v %v", st, err)
+	}
+	if err := post(hook(jid, "indonesia", "l2")); err != nil || e.st.contacts["u1"].Locale != "id" {
+		t.Errorf("INDONESIA: %q %v", e.st.contacts["u1"].Locale, err)
+	}
+}
+
+func TestSettingsLanguageIsSaved(t *testing.T) {
+	e := setup()
+	ctx := context.Background()
+	if _, err := e.svc.UpdateSettings(ctx, "u1", SettingsUpdate{Phone: "081234567890", Locale: "en", Frequency: "weekdays", Timezone: "Asia/Makassar"}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := e.svc.Settings(ctx, "u1")
+	if st.Language != "en" || st.Frequency != "weekdays" || st.Timezone != "Asia/Makassar" {
+		t.Errorf("%+v", st)
+	}
+}

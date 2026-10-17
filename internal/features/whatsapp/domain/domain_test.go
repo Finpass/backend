@@ -83,6 +83,7 @@ func TestParseCommand(t *testing.T) {
 	tests := map[string]Command{
 		"MORE": CmdMore, " more ": CmdMore, "More!": CmdMore, "stop": CmdStop, "STOP.": CmdStop, "berhenti": CmdStop, "Resume": CmdResume,
 		"profile": CmdProfile, "UPDATE": CmdUpdate, "help": CmdHelp, "bantuan": CmdHelp,
+		"English": CmdEnglish, "en": CmdEnglish, "inggris": CmdEnglish, "INDONESIA": CmdIndo, "id": CmdIndo, "Bahasa.": CmdIndo, "english please": CmdUnknown,
 		"apakah saya harus beli saham?": CmdQuestion, "bagaimana dengan emas": CmdQuestion, "???": CmdQuestion,
 		"terima kasih": CmdUnknown, "": CmdUnknown, "   ": CmdUnknown, "stop sekarang juga": CmdUnknown,
 	}
@@ -109,8 +110,8 @@ var opt = Options{Locale: "id", Link: "http://localhost:3000/dashboard", Now: ti
 
 func TestComposeFullIDandEN(t *testing.T) {
 	id := Compose(full(), opt)
-	for _, want := range []string{"Selamat pagi, Surya. Berikut briefing keuangan Anda untuk 16 Okt.", "BBCA turun 3.2% kemarin.", "Posisi Anda turun ~Rp 480.000.", "Tidak ada aksi yang diperlukan saat ini.",
-		"Berita: BI Rate ditahan", "Relevan karena Anda punya reksa dana pendapatan tetap.", "Makro: USD/IDR Rp 18.033 (naik 2.4%).", "Satu langkah: Tingkatkan investasi bulanan.", "Balas MORE", "http://localhost:3000/dashboard"} {
+	for _, want := range []string{"*Finpass*\nSelamat pagi, Surya. Berikut briefing keuangan Anda untuk 16 Okt.", "BBCA turun 3,2% kemarin.", "Posisi Anda turun ~Rp 480.000.", "Tidak ada aksi yang diperlukan saat ini.",
+		"Berita: BI Rate ditahan", "Relevan karena Anda punya reksa dana pendapatan tetap.", "Makro: USD/IDR Rp 18.033 (naik 2,4%).", "Satu langkah: Tingkatkan investasi bulanan.", "Balas MORE", "http://localhost:3000/dashboard"} {
 		if !strings.Contains(id.Text, want) {
 			t.Errorf("id text lacks %q:\n%s", want, id.Text)
 		}
@@ -316,5 +317,23 @@ func TestDue(t *testing.T) {
 	}
 	if !ValidSendTime("07:00") || ValidSendTime("7:00") || ValidSendTime("24:00") || ValidSendTime("07:60") {
 		t.Error("send time validation")
+	}
+}
+
+func TestPctUsesLocaleSeparator(t *testing.T) {
+	if pct(-13.987, "id") != "13,99" || pct(13.987, "en") != "13.99" || pct(3, "id") != "3" {
+		t.Errorf("%q %q %q", pct(-13.987, "id"), pct(13.987, "en"), pct(3, "id"))
+	}
+}
+
+func TestLanguageReplyIsInTheNewLanguage(t *testing.T) {
+	if got := Reply(CmdEnglish, ReplyContext{Locale: "en"}); !strings.Contains(got, "changed to English") || !strings.Contains(got, "INDONESIA") {
+		t.Errorf("en: %q", got)
+	}
+	if got := Reply(CmdIndo, ReplyContext{Locale: "id"}); !strings.Contains(got, "Bahasa Indonesia") || !strings.Contains(got, "ENGLISH") {
+		t.Errorf("id: %q", got)
+	}
+	if !strings.Contains(Reply(CmdHelp, ReplyContext{Locale: "en"}), "ENGLISH / INDONESIA") {
+		t.Error("help must list the language commands")
 	}
 }

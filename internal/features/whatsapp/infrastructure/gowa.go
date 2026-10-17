@@ -16,12 +16,13 @@ import (
 // GoWA talks to github.com/aldinokemal/go-whatsapp-web-multidevice (REST): POST /send/message with
 // {"phone": "<digits>@s.whatsapp.net", "message": "..."} and GET /app/status; HTTP basic auth when configured.
 type GoWA struct {
-	base, user, pass string
-	http             *http.Client
+	base, user, pass, device string
+	http                     *http.Client
 }
 
-func NewGoWA(baseURL, user, pass string) *GoWA {
-	return &GoWA{base: strings.TrimRight(baseURL, "/"), user: user, pass: pass, http: &http.Client{Timeout: 20 * time.Second}}
+// GoWA v9 scopes every call to a device slot, sent as X-Device-Id (create it with POST /devices).
+func NewGoWA(baseURL, user, pass, device string) *GoWA {
+	return &GoWA{base: strings.TrimRight(baseURL, "/"), user: user, pass: pass, device: device, http: &http.Client{Timeout: 20 * time.Second}}
 }
 
 func (g *GoWA) do(ctx context.Context, method, path string, in, out any) error {
@@ -39,6 +40,9 @@ func (g *GoWA) do(ctx context.Context, method, path string, in, out any) error {
 	}
 	if g.user != "" {
 		req.SetBasicAuth(g.user, g.pass)
+	}
+	if g.device != "" {
+		req.Header.Set("X-Device-Id", g.device)
 	}
 	resp, err := g.http.Do(req)
 	if err != nil {

@@ -59,11 +59,12 @@ type Settings struct {
 	Frequency     string     `json:"frequency"`
 	Paused        bool       `json:"paused"`
 	DeliveryIssue bool       `json:"deliveryIssue"`
+	Language      string     `json:"language"`
 }
 
 func view(c domain.Contact) Settings {
 	s := Settings{Verified: c.Verified, OptIn: c.OptIn, SendTimeLocal: c.SendTime, Timezone: c.Timezone, LastSentAt: c.LastSentAt, Frequency: c.Frequency,
-		Paused: c.PausedAt != nil, DeliveryIssue: c.FailStreak >= 3}
+		Paused: c.PausedAt != nil, DeliveryIssue: c.FailStreak >= 3, Language: c.Locale}
 	if c.Phone != "" {
 		p := c.Phone
 		s.Phone = &p
@@ -412,6 +413,12 @@ func (s *Service) HandleWebhook(ctx context.Context, body []byte, signature stri
 			return err
 		}
 		s.event(ctx, c.UserID, "opt_out", "", map[string]any{"via": "STOP"})
+	case domain.CmdEnglish, domain.CmdIndo:
+		c.Locale = map[domain.Command]string{domain.CmdEnglish: "en", domain.CmdIndo: "id"}[cmd]
+		if err := s.d.Store.SaveContact(ctx, c); err != nil {
+			return err
+		}
+		s.event(ctx, c.UserID, "language_changed", "", map[string]any{"locale": c.Locale})
 	case domain.CmdResume:
 		c.OptIn, c.PausedAt = true, nil
 		if err := s.d.Store.SaveContact(ctx, c); err != nil {

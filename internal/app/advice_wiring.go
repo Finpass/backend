@@ -53,15 +53,12 @@ func mountAdvice(r chi.Router, d Deps, authH *authhttp.Handler, profiles *profil
 	matchhttp.New(ms, authH.RequireAuth, authhttp.UserID, jakarta, time.Now).Routes(r)
 
 	c := d.Config.WA
-	link := "http://localhost:3000"
-	if len(d.Config.CORSOrigins) > 0 {
-		link = strings.TrimRight(d.Config.CORSOrigins[0], "/")
-	}
+	link := strings.TrimRight(d.Config.WA.PublicURL, "/") // WhatsApp links must work on a phone, never localhost
 	repo := wainfra.NewRepo(d.Pool)
 	svc := waapp.NewService(waapp.Deps{
 		Store:   repo,
 		Matcher: waMatcher{ms},
-		Sender:  wainfra.NewGoWA(c.BaseURL, c.BasicUser, c.BasicPassword),
+		Sender:  wainfra.NewGoWA(c.BaseURL, c.BasicUser, c.BasicPassword, c.DeviceID),
 		Names:   nameBridge{profileinfra.NewRepo(d.Pool)},
 		Link:    link, Secret: c.WebhookSecret, NewID: newID, Now: time.Now,
 	})
