@@ -229,6 +229,7 @@ Slice `internal/features/advisory`, wired in `internal/app/advisory_wiring.go`, 
 | Method | Path | Notes |
 |--------|------|-------|
 | POST | `/api/v1/advisory/chat` | body `{sessionId?, message (1..1000), lang: "id"\|"en"}` -> `{sessionId, message{id,role,content,citations,createdAt}, grounded}`. 404 without a completed profile ("Complete the financial profile first") or for another user's session, 429 above 20 messages per user per minute, 502 when the AI service fails (the user message stays stored, the client can retry) |
+| GET | `/api/v1/advisory/context` | Everything the advisor knows about the user (profile, money, holdings, recommended mix), shown in the chat side panel. Citations may carry `url` for news |
 | GET | `/api/v1/advisory/sessions` | `{items:[{id,title,updatedAt}]}` newest first, max 50 |
 | GET | `/api/v1/advisory/sessions/{id}` | `{id,title,messages[{id,role,content,citations,createdAt}]}`, 404 for other users |
 | DELETE | `/api/v1/advisory/sessions/{id}` | 204, 404 for other users |
@@ -241,6 +242,8 @@ Slice `internal/features/matching` implements `documentation/YAML MATCHING ENGIN
 |--------|------|--------|
 | GET | `/api/v1/advice/products` | product matching, 5 layers: `portfolio[{class,label{id,en},allocation,currentPct,unallocated,assets[{ticker,name,kind,weight,score,sector,held,reason{id,en}}]}]`, `flags`, `trace{targetAllocation,gatesApplied,gateNotes,exclusions,scoresPerAsset,diversificationActions}`, `summary{id,en}` |
 | GET | `/api/v1/advice/daily` | daily content, 4 layers: `alert`, `news` (+`moreNews`), `macro`, `nudge`, `quietMarket`, `degraded[]`, `trace{alerts,news,macro,nudge}` |
+| POST | `/api/v1/advice/compare` | body `{symbols:[2..4]}`: same gates and 7-part score as the portfolio, per asset `metrics`, `gate{eligible,gate,reason}`, `score{total,components}`, `rank` (0 = excluded), plus `best`, `highlights[{key,symbol,text{id,en}}]`, `notFound[]`. 400 outside 2 to 4 distinct symbols |
+| GET | `/api/v1/advice/suitability` | last 20 audit records `{id,kind:comparison|portfolio,payload,createdAt}`; a record equal to the latest of its kind is not stored again; removed with the user |
 
 Product layers: (1) target allocation from the base ranges at their midpoint, then the YAML modifiers (horizon < 3 y, q10, q5 >= 3, q22 sukuk, q16 crypto/small-cap, ladder <= 2 = only deposits / money-market fund / government bond), normalised to 100; the equity bucket is split large/mid/global/ETF per profile (engine choice, the YAML only gives ranges). (2) Gates: sharia, horizon, Conservative x high volatility, knowledge, ladder. (3) Score = the YAML weighted formula (Sharpe vs the latest 1Y yield, return + positive months, expense ratio, liquidity, PER/PBV/ROE, goal, macro fit). (4) Caps: 10% per asset, 40% per sector, correlation > 0.85 keeps the higher score, class balance flags; holdings win ties and show `held` and `currentPct`. (5) Output + trace. `Recommender` (`application.Recommender`: `Recommend(ctx,userID) -> {textId,textEn,allocation[{label,labelId,pct}],source:"rules",generatedAt}`) feeds `/dashboard/home` through `internal/app/advice_wiring.go`.
 
