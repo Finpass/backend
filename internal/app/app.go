@@ -57,6 +57,7 @@ func NewRouter(d Deps) (*chi.Mux, error) {
 				profilehttp.New(profileSvc, authH.RequireAuth, authhttp.UserID).Routes(r)
 				mountAdvice(r, d, authH, profileSvc) // matching engine + WhatsApp (advice_wiring.go)
 				mountDashboard(r, d, authH)          // portfolio, dashboard, news (dashboard_wiring.go)
+				mountAdvisory(r, d, authH)           // RAG chat (advisory_wiring.go)
 			}
 		}
 	})
