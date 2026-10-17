@@ -102,7 +102,7 @@ func buildUserContext(p matchdomain.Profile, prod matchapp.ProductResult, hs []p
 			HeldKinds: orEmpty(p.HeldKinds), Priorities: orEmpty(p.Priorities),
 			EmergencyMonths: p.EmergencyMonths, EmergencyTargetMonths: p.EmergencyTargetMax, HealthCategory: p.Health.Category, HealthScore: p.Health.Total,
 		},
-		Holdings: []advdomain.HoldingFact{}, Recommended: []advdomain.ClassFact{},
+		Holdings: []advdomain.HoldingFact{}, Recommended: []advdomain.ClassFact{}, Comparison: []advdomain.CompareFact{}, News: []advdomain.NewsFact{},
 	}
 	if p.Goal != "" && p.Goal != "none" {
 		g := p.Goal
@@ -132,6 +132,14 @@ func buildUserContext(p matchdomain.Profile, prod matchapp.ProductResult, hs []p
 	return uc
 }
 
+// clip keeps a feed summary short enough for a prompt, cutting on a rune boundary.
+func clip(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
+}
+
 func orEmpty(s []string) []string {
 	if s == nil {
 		return []string{}
@@ -154,7 +162,7 @@ func (b newsBridge) Latest(ctx context.Context, userID string, limit int) ([]adv
 		if len(out) == limit {
 			break
 		}
-		out = append(out, advdomain.NewsFact{Title: a.Title, Source: a.Source, URL: a.URL, PublishedAt: a.PublishedAt, Summary: a.Summary})
+		out = append(out, advdomain.NewsFact{Title: a.Title, Source: a.Source, URL: a.URL, PublishedAt: a.PublishedAt, Summary: clip(a.Summary, 600)})
 	}
 	return out, nil
 }
