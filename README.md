@@ -191,6 +191,37 @@ News: `category` is validated, an invalid `cursor` is 422, `sentiment` is mapped
 
 Tests: `go test ./internal/features/{portfolio,dashboard,news}/...` (valuation/FX/history/weights tables and properties, validation, ownership isolation and limit with fakes, HTTP status and envelope).
 
+## Discover (asset screener)
+
+Slice `internal/features/discover` (domain / application / infrastructure / transport), command `cmd/metrics`, migration `db/migrations/20261019200001_create_discover.sql`. Contract: `../documentation/discover-contract.md`.
+
+```
+make migrate-up
+make refresh-metrics      # rebuilds asset_metrics (~11 s for 42k assets). Run it after make import-market / make classify-assets
+```
+
+`asset_metrics` is a plain table, not a materialized view: the derivations are Go domain functions (`domain.Derive`, unit tested) fed by one SQL over `assets`, `prices_daily`, `dividends`, `fundamentals` and `asset_classifications`; the table is truncated and bulk-loaded in one transaction. Page queries read it through one index per sort column and direction (`ORDER BY col DIR NULLS LAST, symbol`), so a page costs 0.3 to 6 ms in Postgres (end-to-end HTTP, worst of 5,076 consecutive pages across all 12 sorts: 81 ms).
+
+| Method | Path | Notes |
+|--------|------|-------|
+| GET | `/api/v1/discover/assets` | `q` (symbol prefix/contains or name contains), `class` (`all` equity etf crypto commodity fx; `commodity` = futures + gold), `exchange` (JKT, US, LSE...), `industry` (case-insensitive exact, use the facet value), `sort` (`marketCap` default, `lastPrice`, `ret7d`, `ret1y`, `divYield`, `name`), `dir` (default desc; asc for name), `limit` (50, max 100), `cursor`, `watchlist=true`. Returns `{items, nextCursor, total, asOf}`; 422 `VALIDATION_FAILED` on bad parameters |
+| GET | `/api/v1/discover/facets` | `{classes[{value,labelId,labelEn,count}], exchanges[{value,count}], industries[{value,count}]}` (top 200 industries) |
+| PUT / DELETE | `/api/v1/discover/watchlist/{symbol}` | 204 idempotent; PUT 404 for an unknown symbol; stars are per user |
+
+Keyset cursor: opaque base64url of `{sort, dir, last value or null, last symbol}`; it is rejected (422) when used with a different `sort`/`dir`. NULLs sort last in both directions.
+
+Data decisions (made after inspecting the real rows):
+- `fundamentals.info` keys: `marketCap, trailingPE, forwardPE, priceToBook, totalRevenue, dividendYield, netIncomeToCommon...`. `dividendYield` is already a percent (BBCA 6.27 with close 5,225, max 14.34), used as is. Statements: `statements.income_stmt[<annual date>]["Net Income" | "Total Revenue"]`.
+- Last price: latest close in the asset currency, no conversion (crypto is IDR, futures USD; sorting by price therefore mixes currencies). Source closes are float32-derived, so values like 95.80999755859375 appear.
+- `ret7d` / `ret1y`: last close vs the close on or before (asset latest trade date - 7 days / - 1 year). No such row (history shorter than the window) gives `null`. Only 18,368 of 42,283 assets have a 1Y return because most histories start in Oct 2025.
+- Valuation: PE if `trailingPE > 0`, else PB if `priceToBook > 0`, else PS = marketCap / totalRevenue. Result on the 100 IDX stocks: 89 PE, 11 PB.
+- Growth: the two most recent annual periods with a value. `E` = net income change if the previous is > 0 (percent from a loss or zero is not meaningful), else `R` = revenue change, else null. `netIncomeToCommon` is a single TTM number and is not used for growth. Result: 91 E, 9 R.
+- Div yield: fundamentals percent when > 0, else trailing 365-day sum of `dividends` / last close * 100 when `dividends.currency` equals the asset currency (GBp vs GBp ok, never GBp vs GBP). A zero yield is `null` (n/a). Yields above 100% are dropped as bad source data (58 assets, e.g. 453.6 per share dividend on a 1.36 price). 13,612 assets have a yield.
+- Industry: fundamentals industry, else the classifier sector humanised (almost always `unknown`, so effectively skipped), else the asset class label in English (Equity, ETF, Cryptocurrency, Commodity, Gold, Currency). 31,091 equities and 11,055 ETFs therefore show `Equity` / `ETF`.
+- Market cap: fundamentals only (100 IDX stocks), in IDR; everything else `null`. `analystTarget` is always `null`.
+- `assetClass` in items is the raw source class (`gold` is separate from `commodity` there; labels `Emas`/`Gold`); the `commodity` filter and facet cover both.
+- Search results follow the chosen sort, not relevance: searching `AAPL` lists matches by symbol when market cap is null for all of them.
+
 ## Matching engine
 
 Slice `internal/features/matching` implements `documentation/YAML MATCHING ENGINE.yaml` as pure Go (`domain/`, no I/O): rules decide every number, the text is a deterministic template (the AI service is not called). Endpoints (auth required, no completed profile = 404):

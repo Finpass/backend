@@ -12,6 +12,9 @@ import (
 	dashdomain "shenzen/backend/internal/features/dashboard/domain"
 	dashinfra "shenzen/backend/internal/features/dashboard/infrastructure"
 	dashhttp "shenzen/backend/internal/features/dashboard/transport"
+	discoverapp "shenzen/backend/internal/features/discover/application"
+	discoverinfra "shenzen/backend/internal/features/discover/infrastructure"
+	discoverhttp "shenzen/backend/internal/features/discover/transport"
 	marketdomain "shenzen/backend/internal/features/market/domain"
 	marketinfra "shenzen/backend/internal/features/market/infrastructure"
 	newsapp "shenzen/backend/internal/features/news/application"
@@ -36,6 +39,9 @@ func mountDashboard(r chi.Router, d Deps, authH *authhttp.Handler) {
 
 	news := newsapp.NewService(newsFeed{market.repo}, newsinfra.NewRepo(d.Pool), pf)
 	newshttp.New(news, authH.RequireAuth, authhttp.UserID).Routes(r)
+
+	discover := discoverapp.NewService(discoverinfra.NewCatalog(d.Pool), discoverinfra.NewWatchlist(d.Pool))
+	discoverhttp.New(discover, authH.RequireAuth, authhttp.UserID).Routes(r)
 }
 
 // newRecommender is the seam for the matching engine: replace the rules fallback by an adapter over its service.
