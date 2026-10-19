@@ -57,7 +57,10 @@ func mountAdvice(r chi.Router, d Deps, authH *authhttp.Handler, profiles *profil
 
 	c := d.Config.WA
 	link := strings.TrimRight(d.Config.WA.PublicURL, "/") // WhatsApp links must work on a phone, never localhost
-	repo := wainfra.NewRepo(d.Pool)
+	repo := wainfra.NewRepo(d.Pool, d.Keys)
+	if err := repo.Backfill(context.Background()); err != nil {
+		slog.Error("whatsapp: encrypting existing rows failed", "err", err)
+	}
 	svc := waapp.NewService(waapp.Deps{
 		Store:   repo,
 		Matcher: waMatcher{ms},
@@ -67,6 +70,7 @@ func mountAdvice(r chi.Router, d Deps, authH *authhttp.Handler, profiles *profil
 	})
 	wahttp.New(svc, authH.RequireAuth, authhttp.UserID).Routes(r)
 	profiles.AlsoErase(svc.Erase)
+	d.Export.add("whatsapp", func(ctx context.Context, id string) (any, error) { return svc.Settings(ctx, id) })
 
 	if c.DailyEnabled {
 		ctx := d.Ctx

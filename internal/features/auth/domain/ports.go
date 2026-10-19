@@ -14,6 +14,7 @@ type UserRepository interface {
 	SetPassword(ctx context.Context, id, passwordHash string) error
 	MarkVerified(ctx context.Context, id string) error
 	LinkGoogle(ctx context.Context, id, sub string) error
+	Delete(ctx context.Context, id string) error // cascades to every row that references the user
 }
 
 type OTPRepository interface {

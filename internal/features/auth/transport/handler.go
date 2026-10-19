@@ -1,22 +1,58 @@
 package transport
 
 import (
+	"context"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"shenzen/backend/internal/features/auth/application"
+	"shenzen/backend/internal/platform/audit"
 	"shenzen/backend/internal/platform/httpx"
+	"shenzen/backend/internal/shared/apperr"
 )
+
+// Exporter gathers everything stored about one user, from every slice, for the data-subject export.
+type Exporter interface {
+	Export(ctx context.Context, userID string) (map[string]any, error)
+}
 
 type Handler struct {
 	svc    *application.Service
 	secure bool
+	// per-account limits sit on top of the per-IP one: failed sign-ins lock one account, mail endpoints cannot be used to spam one inbox
+	failedLogins *httpx.Limiter
+	mails        *httpx.Limiter
+	exports      *httpx.Limiter
+	audit        *audit.Recorder // nil records nothing
+	exporter     Exporter
 }
 
-func New(svc *application.Service, secureCookies bool) *Handler {
-	return &Handler{svc: svc, secure: secureCookies}
+func New(svc *application.Service, secureCookies bool, rec *audit.Recorder, exporter Exporter) *Handler {
+	return &Handler{
+		svc: svc, secure: secureCookies, audit: rec, exporter: exporter,
+		failedLogins: httpx.NewLimiter(5, 15*time.Minute),
+		mails:        httpx.NewLimiter(5, 15*time.Minute),
+		exports:      httpx.NewLimiter(3, time.Hour),
+	}
+}
+
+func accountKey(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
+
+func tooMany(w http.ResponseWriter, retry int) error {
+	w.Header().Set("Retry-After", strconv.Itoa(retry))
+	return apperr.New(apperr.TooManyRequests, "Too many requests, try again shortly")
+}
+
+// mailAllowed counts one mail-sending attempt for this account.
+func (h *Handler) mailAllowed(w http.ResponseWriter, email string) error {
+	if ok, retry := h.mails.Take(accountKey(email)); !ok {
+		return tooMany(w, retry)
+	}
+	return nil
 }
 
 func (h *Handler) Routes(r chi.Router) {
@@ -34,6 +70,8 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Method(http.MethodPost, "/refresh", httpx.HandlerFunc(h.refresh))
 		r.Method(http.MethodPost, "/logout", httpx.HandlerFunc(h.logout))
 		r.With(h.RequireAuth).Method(http.MethodGet, "/me", httpx.HandlerFunc(h.me))
+		r.With(h.RequireAuth).Method(http.MethodGet, "/export", httpx.HandlerFunc(h.export))
+		r.With(h.RequireAuth).Method(http.MethodDelete, "/account", httpx.HandlerFunc(h.deleteAccount))
 	})
 }
 
@@ -73,6 +111,9 @@ func (h *Handler) resendOTP(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if err := h.mailAllowed(w, req.Email); err != nil {
+		return err
+	}
 	if err := h.svc.ResendVerification(r.Context(), req.Email); err != nil {
 		return err
 	}
@@ -85,10 +126,18 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	key := accountKey(req.Email)
+	if blocked, retry := h.failedLogins.Blocked(key); blocked {
+		return tooMany(w, retry)
+	}
 	res, err := h.svc.Login(r.Context(), application.LoginCommand{Email: req.Email, Password: req.Password, Remember: req.Remember, UserAgent: r.UserAgent()})
 	if err != nil {
+		h.failedLogins.Take(key)
+		h.audit.Record(r.Context(), audit.Event{Action: "auth.login.failed"})
 		return err
 	}
+	h.failedLogins.Reset(key)
+	h.audit.Record(r.Context(), audit.Event{Actor: res.User.ID, Action: "auth.login.ok"})
 	h.startSession(w, res, http.StatusOK, "Signed in")
 	return nil
 }
@@ -109,6 +158,9 @@ func (h *Handler) google(w http.ResponseWriter, r *http.Request) error {
 func (h *Handler) forgotPassword(w http.ResponseWriter, r *http.Request) error {
 	req, err := httpx.Decode[emailRequest](w, r)
 	if err != nil {
+		return err
+	}
+	if err := h.mailAllowed(w, req.Email); err != nil {
 		return err
 	}
 	if err := h.svc.ForgotPassword(r.Context(), req.Email); err != nil {
@@ -161,5 +213,36 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	httpx.OK(w, http.StatusOK, "Profile fetched", toUser(u))
+	return nil
+}
+
+// export returns a JSON copy of everything stored about the signed-in user (UU PDP right of access).
+func (h *Handler) export(w http.ResponseWriter, r *http.Request) error {
+	id := UserID(r.Context())
+	if ok, retry := h.exports.Take(id); !ok {
+		return tooMany(w, retry)
+	}
+	data, err := h.exporter.Export(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	h.audit.Record(r.Context(), audit.Event{Actor: id, Action: "account.export"})
+	httpx.OK(w, http.StatusOK, "Data export ready", data)
+	return nil
+}
+
+// deleteAccount erases the user and all their data. The password is asked again, and "DELETE" must be typed.
+func (h *Handler) deleteAccount(w http.ResponseWriter, r *http.Request) error {
+	req, err := httpx.Decode[deleteRequest](w, r)
+	if err != nil {
+		return err
+	}
+	id := UserID(r.Context())
+	if err := h.svc.DeleteAccount(r.Context(), id, req.Password); err != nil {
+		return err
+	}
+	h.audit.Record(r.Context(), audit.Event{Actor: id, Action: "account.delete"})
+	h.clearRefreshCookie(w)
+	httpx.OK(w, http.StatusOK, "Account deleted", nil)
 	return nil
 }

@@ -33,6 +33,7 @@ func mountDashboard(r chi.Router, d Deps, authH *authhttp.Handler) {
 	market := marketBridge{pool: d.Pool, repo: marketinfra.NewRepo(d.Pool)}
 	pf := pfapp.NewService(pfinfra.NewRepo(d.Pool), market, newID, time.Now)
 	pfhttp.New(pf, authH.RequireAuth, authhttp.UserID).Routes(r)
+	d.Export.add("portfolio", func(ctx context.Context, id string) (any, error) { return pf.List(ctx, id) })
 
 	dash := dashapp.NewService(portfolioBridge{pf}, dashinfra.NewProfileRepo(d.Pool), newRecommender(d), time.Now)
 	dashhttp.New(dash, authH.RequireAuth, authhttp.UserID).Routes(r)

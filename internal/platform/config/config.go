@@ -21,7 +21,18 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	Auth            AuthConfig
 	WA              WAConfig
+	Data            DataConfig
 }
+
+// DataConfig holds the keys that encrypt sensitive columns (base64, 32 bytes each: openssl rand -base64 32).
+type DataConfig struct {
+	KEKID    string // id of the active KEK, stored inside every ciphertext
+	KEK      string
+	IndexKey string // separate key for blind indexes
+	OldKEKs  string // retired keys still needed to read old rows: "k1:<base64>,k2:<base64>"
+}
+
+func (d DataConfig) Enabled() bool { return d.KEK != "" }
 
 // WAConfig configures the GoWA gateway (self-hosted WhatsApp REST API) and the daily briefing scheduler.
 type WAConfig struct {
@@ -62,6 +73,7 @@ func Load() (Config, error) {
 		InternalAPIKey:  os.Getenv("INTERNAL_API_KEY"),
 		AIInternalKey:   get("AI_INTERNAL_API_KEY", os.Getenv("INTERNAL_API_KEY")),
 		ShutdownTimeout: 15 * time.Second,
+		Data:            DataConfig{KEKID: get("DATA_KEK_ID", "k1"), KEK: os.Getenv("DATA_KEK"), IndexKey: os.Getenv("DATA_INDEX_KEY"), OldKEKs: os.Getenv("DATA_KEK_OLD")},
 		WA: WAConfig{
 			BaseURL:       get("GOWA_BASE_URL", "http://localhost:3000"),
 			BasicUser:     os.Getenv("GOWA_BASIC_AUTH_USER"),
@@ -117,6 +129,9 @@ func (c Config) validate() error {
 		}
 		if c.Auth.JWTSecret == devJWTSecret {
 			errs = append(errs, errors.New("JWT_SECRET must be set in production"))
+		}
+		if c.Data.KEK == "" || c.Data.IndexKey == "" {
+			errs = append(errs, errors.New("DATA_KEK and DATA_INDEX_KEY are required in production (openssl rand -base64 32)"))
 		}
 		if c.Auth.SMTPHost == "" || c.Auth.MailFrom == "" {
 			errs = append(errs, errors.New("SMTP_HOST and MAIL_FROM are required in production"))

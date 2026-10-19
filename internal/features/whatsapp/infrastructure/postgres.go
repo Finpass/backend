@@ -11,11 +11,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"shenzen/backend/internal/features/whatsapp/domain"
+	"shenzen/backend/internal/platform/crypto"
 )
 
-type Repo struct{ pool *pgxpool.Pool }
+// Repo keeps phone numbers and message bodies encrypted (keys may be nil in development: values then stay plaintext).
+type Repo struct {
+	pool *pgxpool.Pool
+	keys *crypto.Keyring
+}
 
-func NewRepo(p *pgxpool.Pool) Repo { return Repo{p} }
+func NewRepo(p *pgxpool.Pool, k *crypto.Keyring) Repo { return Repo{p, k} }
+
+const (
+	phoneLabel = "whatsapp_contacts.phone"
+	verifLabel = "whatsapp_verifications.phone"
+	bodyLabel  = "whatsapp_messages.body"
+)
 
 func mapErr(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -31,34 +42,46 @@ func isUnique(err error, constraint string) bool {
 
 const contactCols = `user_id, coalesce(phone,''), verified, verified_at, opt_in, paused_at, send_time_local, timezone, frequency, locale, last_sent_at, last_inbound_at, fail_streak`
 
-func scanContact(row pgx.Row) (domain.Contact, error) {
+func (r Repo) scanContact(row pgx.Row) (domain.Contact, error) {
 	var c domain.Contact
 	err := row.Scan(&c.UserID, &c.Phone, &c.Verified, &c.VerifiedAt, &c.OptIn, &c.PausedAt, &c.SendTime, &c.Timezone, &c.Frequency, &c.Locale, &c.LastSentAt, &c.LastInboundAt, &c.FailStreak)
-	return c, mapErr(err)
+	if err != nil {
+		return c, mapErr(err)
+	}
+	if c.Phone != "" {
+		if c.Phone, err = r.keys.Reveal(phoneLabel, c.UserID, c.Phone); err != nil {
+			return c, err
+		}
+	}
+	return c, nil
 }
 
 func (r Repo) Contact(ctx context.Context, userID string) (domain.Contact, error) {
-	return scanContact(r.pool.QueryRow(ctx, `SELECT `+contactCols+` FROM whatsapp_contacts WHERE user_id = $1`, userID))
+	return r.scanContact(r.pool.QueryRow(ctx, `SELECT `+contactCols+` FROM whatsapp_contacts WHERE user_id = $1`, userID))
 }
 
 func (r Repo) SaveContact(ctx context.Context, c domain.Contact) error {
-	var phone any
+	var phone, hash any
 	if c.Phone != "" {
-		phone = c.Phone
+		sealed, err := r.keys.Protect(phoneLabel, c.UserID, c.Phone)
+		if err != nil {
+			return err
+		}
+		phone, hash = sealed, r.keys.Index(phoneLabel, c.Phone)
 	}
-	_, err := r.pool.Exec(ctx, `INSERT INTO whatsapp_contacts (user_id, phone, verified, verified_at, opt_in, paused_at, send_time_local, timezone, frequency, locale)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-		ON CONFLICT (user_id) DO UPDATE SET phone = $2, verified = $3, verified_at = $4, opt_in = $5, paused_at = $6, send_time_local = $7,
+	_, err := r.pool.Exec(ctx, `INSERT INTO whatsapp_contacts (user_id, phone, phone_hash, verified, verified_at, opt_in, paused_at, send_time_local, timezone, frequency, locale)
+		VALUES ($1,$2,$11,$3,$4,$5,$6,$7,$8,$9,$10)
+		ON CONFLICT (user_id) DO UPDATE SET phone = $2, phone_hash = $11, verified = $3, verified_at = $4, opt_in = $5, paused_at = $6, send_time_local = $7,
 		  timezone = $8, frequency = $9, locale = $10, updated_at = now()`,
-		c.UserID, phone, c.Verified, c.VerifiedAt, c.OptIn, c.PausedAt, c.SendTime, c.Timezone, c.Frequency, c.Locale)
-	if isUnique(err, "whatsapp_contacts_phone_verified_uq") {
+		c.UserID, phone, c.Verified, c.VerifiedAt, c.OptIn, c.PausedAt, c.SendTime, c.Timezone, c.Frequency, c.Locale, hash)
+	if isUnique(err, "whatsapp_contacts_phone_hash_verified_uq") {
 		return domain.ErrPhoneUsed
 	}
 	return err
 }
 
 func (r Repo) ContactByPhone(ctx context.Context, phone string) (domain.Contact, error) {
-	return scanContact(r.pool.QueryRow(ctx, `SELECT `+contactCols+` FROM whatsapp_contacts WHERE phone = $1 AND verified`, phone))
+	return r.scanContact(r.pool.QueryRow(ctx, `SELECT `+contactCols+` FROM whatsapp_contacts WHERE phone_hash = $1 AND verified`, r.keys.Index(phoneLabel, phone)))
 }
 
 func (r Repo) ListActive(ctx context.Context) ([]domain.Contact, error) {
@@ -69,7 +92,7 @@ func (r Repo) ListActive(ctx context.Context) ([]domain.Contact, error) {
 	defer rows.Close()
 	var out []domain.Contact
 	for rows.Next() {
-		c, err := scanContact(rows)
+		c, err := r.scanContact(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -94,8 +117,12 @@ func (r Repo) SetSent(ctx context.Context, userID string, at time.Time, failStre
 }
 
 func (r Repo) SaveVerification(ctx context.Context, v domain.Verification) error {
-	_, err := r.pool.Exec(ctx, `INSERT INTO whatsapp_verifications (user_id, phone, code_hash, attempts, expires_at, created_at) VALUES ($1,$2,$3,0,$4,$5)
-		ON CONFLICT (user_id) DO UPDATE SET phone = $2, code_hash = $3, attempts = 0, expires_at = $4, created_at = $5`, v.UserID, v.Phone, v.CodeHash, v.ExpiresAt, v.CreatedAt)
+	phone, err := r.keys.Protect(verifLabel, v.UserID, v.Phone)
+	if err != nil {
+		return err
+	}
+	_, err = r.pool.Exec(ctx, `INSERT INTO whatsapp_verifications (user_id, phone, code_hash, attempts, expires_at, created_at) VALUES ($1,$2,$3,0,$4,$5)
+		ON CONFLICT (user_id) DO UPDATE SET phone = $2, code_hash = $3, attempts = 0, expires_at = $4, created_at = $5`, v.UserID, phone, v.CodeHash, v.ExpiresAt, v.CreatedAt)
 	return err
 }
 
@@ -103,7 +130,11 @@ func (r Repo) Verification(ctx context.Context, userID string) (domain.Verificat
 	var v domain.Verification
 	err := r.pool.QueryRow(ctx, `SELECT user_id, phone, code_hash, attempts, expires_at, created_at FROM whatsapp_verifications WHERE user_id = $1`, userID).
 		Scan(&v.UserID, &v.Phone, &v.CodeHash, &v.Attempts, &v.ExpiresAt, &v.CreatedAt)
-	return v, mapErr(err)
+	if err != nil {
+		return v, mapErr(err)
+	}
+	v.Phone, err = r.keys.Reveal(verifLabel, v.UserID, v.Phone)
+	return v, err
 }
 
 func (r Repo) AddVerificationAttempt(ctx context.Context, userID string) error {
@@ -149,8 +180,12 @@ func (r Repo) SentCount(ctx context.Context, userID string) (int, error) {
 }
 
 func (r Repo) LogMessage(ctx context.Context, m domain.Message) error {
-	_, err := r.pool.Exec(ctx, `INSERT INTO whatsapp_messages (id, user_id, direction, kind, body, status, provider_id, error) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-		m.ID, m.UserID, m.Direction, m.Kind, m.Body, m.Status, m.ProviderID, m.Error)
+	body, err := r.keys.Protect(bodyLabel, m.ID, m.Body)
+	if err != nil {
+		return err
+	}
+	_, err = r.pool.Exec(ctx, `INSERT INTO whatsapp_messages (id, user_id, direction, kind, body, status, provider_id, error) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		m.ID, m.UserID, m.Direction, m.Kind, body, m.Status, m.ProviderID, m.Error)
 	if isUnique(err, "") {
 		return domain.ErrDuplicate
 	}
@@ -178,4 +213,67 @@ func (r Repo) Erase(ctx context.Context, userID string) error {
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// Backfill encrypts rows written before encryption was enabled and fills the blind index; safe to run on every start.
+func (r Repo) Backfill(ctx context.Context) error {
+	cond := `phone_hash IS NULL`
+	if r.keys != nil {
+		cond = `phone_hash IS NULL OR phone NOT LIKE 'v1:%'`
+	}
+	rows, err := r.pool.Query(ctx, `SELECT user_id, phone FROM whatsapp_contacts WHERE phone IS NOT NULL AND (`+cond+`)`)
+	if err != nil {
+		return err
+	}
+	type row struct{ id, phone string }
+	var todo []row
+	for rows.Next() {
+		var x row
+		if err := rows.Scan(&x.id, &x.phone); err != nil {
+			rows.Close()
+			return err
+		}
+		todo = append(todo, x)
+	}
+	rows.Close()
+	for _, x := range todo {
+		plain, err := r.keys.Reveal(phoneLabel, x.id, x.phone)
+		if err != nil {
+			return err
+		}
+		sealed, err := r.keys.Protect(phoneLabel, x.id, plain)
+		if err != nil {
+			return err
+		}
+		if _, err := r.pool.Exec(ctx, `UPDATE whatsapp_contacts SET phone = $2, phone_hash = $3 WHERE user_id = $1`, x.id, sealed, r.keys.Index(phoneLabel, plain)); err != nil {
+			return err
+		}
+	}
+	if r.keys == nil {
+		return nil
+	}
+	mrows, err := r.pool.Query(ctx, `SELECT id, body FROM whatsapp_messages WHERE body <> '' AND body NOT LIKE 'v1:%'`)
+	if err != nil {
+		return err
+	}
+	var msgs []row
+	for mrows.Next() {
+		var x row
+		if err := mrows.Scan(&x.id, &x.phone); err != nil {
+			mrows.Close()
+			return err
+		}
+		msgs = append(msgs, x)
+	}
+	mrows.Close()
+	for _, x := range msgs {
+		sealed, err := r.keys.Protect(bodyLabel, x.id, x.phone)
+		if err != nil {
+			return err
+		}
+		if _, err := r.pool.Exec(ctx, `UPDATE whatsapp_messages SET body = $2 WHERE id = $1`, x.id, sealed); err != nil {
+			return err
+		}
+	}
+	return nil
 }

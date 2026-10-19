@@ -60,3 +60,8 @@ func toUser(u domain.User) userResponse { return userResponse{ID: u.ID, Email: u
 func toSession(r application.Result) sessionResponse {
 	return sessionResponse{User: toUser(r.User), AccessToken: r.Tokens.Access, AccessExpiresAt: r.Tokens.AccessExpiresAt}
 }
+
+type deleteRequest struct {
+	Password string `json:"password" validate:"max=72"` // required by the service when the account has a password
+	Confirm  string `json:"confirm" validate:"required,eq=DELETE"`
+}

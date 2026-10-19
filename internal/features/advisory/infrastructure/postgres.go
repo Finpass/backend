@@ -11,14 +11,28 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"shenzen/backend/internal/features/advisory/domain"
+	"shenzen/backend/internal/platform/crypto"
 )
 
-type Store struct{ pool *pgxpool.Pool }
+// Store keeps chat text encrypted (keys may be nil in development: text then stays plaintext).
+type Store struct {
+	pool *pgxpool.Pool
+	keys *crypto.Keyring
+}
 
-func NewStore(p *pgxpool.Pool) Store { return Store{p} }
+func NewStore(p *pgxpool.Pool, k *crypto.Keyring) Store { return Store{p, k} }
+
+const (
+	titleLabel   = "chat_sessions.title"
+	contentLabel = "chat_messages.content"
+)
 
 func (s Store) CreateSession(ctx context.Context, id, userID, title string, now time.Time) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at) VALUES ($1, $2, $3, $4, $4)`, id, userID, title, now)
+	sealed, err := s.keys.Protect(titleLabel, id, title)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at) VALUES ($1, $2, $3, $4, $4)`, id, userID, sealed, now)
 	return err
 }
 
@@ -34,7 +48,10 @@ func (s Store) Title(ctx context.Context, userID, id string) (string, error) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", domain.ErrNotFound
 	}
-	return t, err
+	if err != nil {
+		return t, err
+	}
+	return s.keys.Reveal(titleLabel, id, t)
 }
 
 func (s Store) AddMessage(ctx context.Context, sessionID, role, content string, cites []domain.Citation, trace json.RawMessage, now time.Time) (domain.Message, error) {
@@ -46,13 +63,17 @@ func (s Store) AddMessage(ctx context.Context, sessionID, role, content string, 
 		tj = trace
 	}
 	m := domain.Message{Role: role, Content: content, Citations: cites}
+	sealed, err := s.keys.Protect(contentLabel, sessionID, content)
+	if err != nil {
+		return m, err
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return m, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	if err := tx.QueryRow(ctx, `INSERT INTO chat_messages (session_id, role, content, citations, trace, created_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at`,
-		sessionID, role, content, cj, tj, now).Scan(&m.ID, &m.CreatedAt); err != nil {
+		sessionID, role, sealed, cj, tj, now).Scan(&m.ID, &m.CreatedAt); err != nil {
 		return m, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE chat_sessions SET updated_at = $2 WHERE id = $1`, sessionID, now); err != nil {
@@ -61,13 +82,17 @@ func (s Store) AddMessage(ctx context.Context, sessionID, role, content string, 
 	return m, tx.Commit(ctx)
 }
 
-func (s Store) scan(rows pgx.Rows) ([]domain.Message, error) {
+func (s Store) scan(rows pgx.Rows, sessionID string) ([]domain.Message, error) {
 	defer rows.Close()
 	var out []domain.Message
 	for rows.Next() {
 		var m domain.Message
 		var cj, tj []byte
 		if err := rows.Scan(&m.ID, &m.Role, &m.Content, &cj, &tj, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		var err error
+		if m.Content, err = s.keys.Reveal(contentLabel, sessionID, m.Content); err != nil {
 			return nil, err
 		}
 		m.Citations = []domain.Citation{}
@@ -89,7 +114,7 @@ func (s Store) Recent(ctx context.Context, sessionID string, n int) ([]domain.Me
 	if err != nil {
 		return nil, err
 	}
-	return s.scan(rows)
+	return s.scan(rows, sessionID)
 }
 
 func (s Store) Messages(ctx context.Context, sessionID string) ([]domain.Message, error) {
@@ -97,7 +122,7 @@ func (s Store) Messages(ctx context.Context, sessionID string) ([]domain.Message
 	if err != nil {
 		return nil, err
 	}
-	return s.scan(rows)
+	return s.scan(rows, sessionID)
 }
 
 func (s Store) Sessions(ctx context.Context, userID string, limit int) ([]domain.Session, error) {
@@ -112,6 +137,10 @@ func (s Store) Sessions(ctx context.Context, userID string, limit int) ([]domain
 		if err := rows.Scan(&x.ID, &x.Title, &x.UpdatedAt); err != nil {
 			return nil, err
 		}
+		var err error
+		if x.Title, err = s.keys.Reveal(titleLabel, x.ID, x.Title); err != nil {
+			return nil, err
+		}
 		out = append(out, x)
 	}
 	return out, rows.Err()
@@ -120,4 +149,55 @@ func (s Store) Sessions(ctx context.Context, userID string, limit int) ([]domain
 func (s Store) Delete(ctx context.Context, userID, id string) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `DELETE FROM chat_sessions WHERE id = $1 AND user_id = $2`, id, userID)
 	return tag.RowsAffected() > 0, err
+}
+
+// Backfill encrypts chat text written before encryption was enabled; safe to run on every start.
+func (s Store) Backfill(ctx context.Context) error {
+	if s.keys == nil {
+		return nil
+	}
+	type row struct{ id, owner, text string }
+	collect := func(q string) ([]row, error) {
+		rows, err := s.pool.Query(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []row
+		for rows.Next() {
+			var x row
+			if err := rows.Scan(&x.id, &x.owner, &x.text); err != nil {
+				return nil, err
+			}
+			out = append(out, x)
+		}
+		return out, rows.Err()
+	}
+	titles, err := collect(`SELECT id, id, title FROM chat_sessions WHERE title NOT LIKE 'v1:%'`)
+	if err != nil {
+		return err
+	}
+	for _, x := range titles {
+		sealed, err := s.keys.Seal(titleLabel, x.id, x.text)
+		if err != nil {
+			return err
+		}
+		if _, err := s.pool.Exec(ctx, `UPDATE chat_sessions SET title = $2 WHERE id = $1`, x.id, sealed); err != nil {
+			return err
+		}
+	}
+	msgs, err := collect(`SELECT id::text, session_id, content FROM chat_messages WHERE content NOT LIKE 'v1:%'`)
+	if err != nil {
+		return err
+	}
+	for _, x := range msgs {
+		sealed, err := s.keys.Seal(contentLabel, x.owner, x.text)
+		if err != nil {
+			return err
+		}
+		if _, err := s.pool.Exec(ctx, `UPDATE chat_messages SET content = $2 WHERE id = $1::bigint`, x.id, sealed); err != nil {
+			return err
+		}
+	}
+	return nil
 }

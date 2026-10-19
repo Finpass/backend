@@ -86,6 +86,10 @@ func (p UserRepo) LinkGoogle(ctx context.Context, id, sub string) error {
 	return p.exec(ctx, `UPDATE users SET google_sub = $2, email_verified = TRUE, updated_at = now() WHERE id = $1`, id, sub)
 }
 
+func (p UserRepo) Delete(ctx context.Context, id string) error {
+	return p.exec(ctx, `DELETE FROM users WHERE id = $1`, id)
+}
+
 func (p OTPRepo) Replace(ctx context.Context, o domain.OTP) error {
 	return p.exec(ctx,
 		`INSERT INTO auth_otps (id, user_id, purpose, code_hash, expires_at, created_at)

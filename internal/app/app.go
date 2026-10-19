@@ -22,7 +22,9 @@ import (
 	profileinfra "shenzen/backend/internal/features/profile/infrastructure"
 	profilehttp "shenzen/backend/internal/features/profile/transport"
 	"shenzen/backend/internal/platform/aiclient"
+	"shenzen/backend/internal/platform/audit"
 	"shenzen/backend/internal/platform/config"
+	"shenzen/backend/internal/platform/crypto"
 	"shenzen/backend/internal/platform/httpx"
 )
 
@@ -31,9 +33,21 @@ type Deps struct {
 	Config config.Config
 	DB     interface{ Ping(context.Context) error }
 	Pool   *pgxpool.Pool
+	Keys   *crypto.Keyring // column encryption; nil only outside production
+	Audit  *audit.Recorder // security trail; nil without a database
+	Export *exportSet      // what each slice contributes to the data-subject export
 }
 
 func NewRouter(d Deps) (*chi.Mux, error) {
+	keys, err := newKeyring(d.Config)
+	if err != nil {
+		return nil, err
+	}
+	d.Keys = keys
+	d.Export = &exportSet{}
+	if d.Pool != nil {
+		d.Audit = audit.New(d.Pool)
+	}
 	r := httpx.NewRouter(d.Config.CORSOrigins)
 
 	checks := map[string]health.Pinger{}
@@ -50,10 +64,15 @@ func NewRouter(d Deps) (*chi.Mux, error) {
 	r.Route("/api/v1", func(r chi.Router) {
 		notehttp.New(noteSvc).Routes(r)
 		if authSvc != nil {
-			authH := authhttp.New(authSvc, d.Config.IsProduction())
+			authH := authhttp.New(authSvc, d.Config.IsProduction(), d.Audit, d.Export)
+			d.Export.add("account", func(ctx context.Context, id string) (any, error) {
+				u, err := authSvc.Me(ctx, id)
+				return map[string]any{"id": u.ID, "email": u.Email, "name": u.Name, "emailVerified": u.EmailVerified, "createdAt": u.CreatedAt}, err
+			})
 			authH.Routes(r)
 			if d.Pool != nil {
 				profileSvc := newProfileService(d)
+				d.Export.add("profile", func(ctx context.Context, id string) (any, error) { return profileSvc.Get(ctx, id) })
 				profilehttp.New(profileSvc, authH.RequireAuth, authhttp.UserID).Routes(r)
 				mountAdvice(r, d, authH, profileSvc) // matching engine + WhatsApp (advice_wiring.go)
 				mountDashboard(r, d, authH)          // portfolio, dashboard, news (dashboard_wiring.go)

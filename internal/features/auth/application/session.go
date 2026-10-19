@@ -62,3 +62,19 @@ func (s *Service) Me(ctx context.Context, userID string) (domain.User, error) {
 	}
 	return u, err
 }
+
+// DeleteAccount permanently removes the user and, through ON DELETE CASCADE, everything stored about them (UU PDP).
+// It asks for the password again when the account has one: a stolen session alone must not be enough to erase it.
+func (s *Service) DeleteAccount(ctx context.Context, userID, password string) error {
+	u, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if u.HasPassword() && !s.hasher.Compare(u.PasswordHash, password) {
+		return domain.ErrInvalidLogin
+	}
+	if err := s.sessions.RevokeAll(ctx, userID, s.now()); err != nil {
+		return err
+	}
+	return s.users.Delete(ctx, userID)
+}

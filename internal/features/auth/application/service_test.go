@@ -64,6 +64,11 @@ func (m *memStore) LinkGoogle(_ context.Context, id, s string) error {
 	return m.update(id, func(u *domain.User) { u.GoogleSub, u.EmailVerified = s, true })
 }
 
+func (m *memStore) Delete(_ context.Context, id string) error {
+	delete(m.users, id)
+	return nil
+}
+
 type otpRepo struct{ *memStore }
 
 func (r otpRepo) Replace(_ context.Context, o domain.OTP) error {
@@ -283,5 +288,28 @@ func TestGoogleLoginCreatesAndLinks(t *testing.T) {
 	disabled, _ := newService(t, &now, nil)
 	if _, err := disabled.LoginWithGoogle(ctx, application.GoogleCommand{AccessToken: "x"}); !errors.Is(err, domain.ErrGoogleDisabled) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestDeleteAccountNeedsThePassword(t *testing.T) {
+	ctx, now := context.Background(), time.Now()
+	svc, mail := newService(t, &now, nil)
+	_, _ = svc.Register(ctx, application.RegisterCommand{Name: "Di", Email: "di@example.com", Password: "secret123"})
+	res, _ := svc.VerifyEmail(ctx, application.VerifyCommand{Email: "di@example.com", Code: mail.code})
+
+	if err := svc.DeleteAccount(ctx, res.User.ID, "wrong-pass1"); code(t, err) != apperr.Unauthorized {
+		t.Fatal("a wrong password must not delete the account")
+	}
+	if _, err := svc.Me(ctx, res.User.ID); err != nil {
+		t.Fatal("the account must survive a refused deletion")
+	}
+	if err := svc.DeleteAccount(ctx, res.User.ID, "secret123"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Me(ctx, res.User.ID); err == nil {
+		t.Fatal("the account must be gone")
+	}
+	if _, err := svc.Refresh(ctx, res.Tokens.Refresh, ""); err == nil {
+		t.Fatal("sessions must end with the account")
 	}
 }

@@ -34,14 +34,33 @@ const aiChatTimeout = 60 * time.Second
 func mountAdvisory(r chi.Router, d Deps, authH *authhttp.Handler) {
 	market := marketBridge{pool: d.Pool, repo: marketinfra.NewRepo(d.Pool)}
 	pf := pfapp.NewService(pfinfra.NewRepo(d.Pool), market, newID, time.Now)
+	store := advinfra.NewStore(d.Pool, d.Keys)
+	if err := store.Backfill(context.Background()); err != nil {
+		slog.Error("advisory: encrypting existing chats failed", "err", err)
+	}
 	svc := advapp.NewService(advapp.Deps{
-		Store:    advinfra.NewStore(d.Pool),
+		Store:    store,
 		Contexts: contextBuilder{profiles: profileBridge{profileinfra.NewRepo(d.Pool)}, matching: matching(d), portfolio: pf},
 		News:     newsBridge{svc: newsapp.NewService(newsFeed{market.repo}, newsinfra.NewRepo(d.Pool), pf)},
 		AI:       advinfra.NewAI(aiclient.New(d.Config.AIServiceURL, d.Config.AIInternalKey, aiChatTimeout)),
 		NewID:    newUUID, Now: time.Now,
 	})
 	advhttp.New(svc, authH.RequireAuth, authhttp.UserID).Routes(r)
+	d.Export.add("chats", func(ctx context.Context, id string) (any, error) {
+		list, err := svc.Sessions(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]advapp.Detail, 0, len(list))
+		for _, s := range list {
+			det, err := svc.Session(ctx, id, s.ID)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, det)
+		}
+		return out, nil
+	})
 }
 
 // contextBuilder assembles the AI user context from the profile, the portfolio and the matching engine.
