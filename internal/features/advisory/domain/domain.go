@@ -88,6 +88,8 @@ type CompareFact struct {
 	DivYield   *float64 `json:"divYield"`
 	PER        *float64 `json:"per"`
 	PBV        *float64 `json:"pbv"`
+	ROE        *float64 `json:"roe"`
+	Beta       *float64 `json:"beta"`
 }
 
 type ProfileFacts struct {

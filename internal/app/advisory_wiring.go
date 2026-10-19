@@ -86,7 +86,7 @@ func compareFacts(c matchapp.CompareResult) []advdomain.CompareFact {
 	for _, a := range c.Assets {
 		out = append(out, advdomain.CompareFact{
 			Symbol: a.Symbol, Name: a.Name, Class: a.Class, Eligible: a.Gate.Eligible, Gate: a.Gate.Gate, Score: a.Score.Total, Rank: a.Rank,
-			Return1Y: a.Metrics.Return1Y, Volatility: a.Metrics.Volatility, Sharpe: a.Metrics.Sharpe, DivYield: a.Metrics.DivYield, PER: a.Metrics.PER, PBV: a.Metrics.PBV,
+			Return1Y: a.Metrics.Return1Y, Volatility: a.Metrics.Volatility, Sharpe: a.Metrics.Sharpe, DivYield: a.Metrics.DivYield, PER: a.Metrics.PER, PBV: a.Metrics.PBV, ROE: a.Metrics.ROE, Beta: a.Metrics.Beta,
 		})
 	}
 	return out
