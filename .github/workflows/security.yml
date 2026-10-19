@@ -1,0 +1,32 @@
+name: security
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * 1" # weekly: new advisories appear without new commits
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks reads the whole history
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Known vulnerabilities in dependencies
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: Static analysis
+        run: go run github.com/securego/gosec/v2/cmd/gosec@latest -quiet -exclude-generated ./...
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
