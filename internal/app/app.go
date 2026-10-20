@@ -26,6 +26,7 @@ import (
 	"shenzen/backend/internal/platform/config"
 	"shenzen/backend/internal/platform/crypto"
 	"shenzen/backend/internal/platform/httpx"
+	"shenzen/backend/internal/platform/maintenance"
 )
 
 type Deps struct {
@@ -47,7 +48,14 @@ func NewRouter(d Deps) (*chi.Mux, error) {
 	d.Export = &exportSet{}
 	if d.Pool != nil {
 		d.Audit = audit.New(d.Pool)
+		ctx := d.Ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		go maintenance.Run(ctx, d.Pool, d.Audit, maintenance.Policy{
+			ChatDays: d.Config.Retention.ChatDays, WhatsAppMessageDays: d.Config.Retention.WhatsAppMessageDays, EventDays: d.Config.Retention.EventDays})
 	}
+	httpx.SetProxyHops(d.Config.ProxyHops)
 	r := httpx.NewRouter(d.Config.CORSOrigins)
 
 	checks := map[string]health.Pinger{}
@@ -62,7 +70,9 @@ func NewRouter(d Deps) (*chi.Mux, error) {
 		return nil, err
 	}
 	r.Route("/api/v1", func(r chi.Router) {
-		notehttp.New(noteSvc).Routes(r)
+		if !d.Config.IsProduction() { // demo slice: public, in-memory, no owner
+			notehttp.New(noteSvc).Routes(r)
+		}
 		if authSvc != nil {
 			authH := authhttp.New(authSvc, d.Config.IsProduction(), d.Audit, d.Export)
 			d.Export.add("account", func(ctx context.Context, id string) (any, error) {
@@ -73,7 +83,7 @@ func NewRouter(d Deps) (*chi.Mux, error) {
 			if d.Pool != nil {
 				profileSvc := newProfileService(d)
 				d.Export.add("profile", func(ctx context.Context, id string) (any, error) { return profileSvc.Get(ctx, id) })
-				profilehttp.New(profileSvc, authH.RequireAuth, authhttp.UserID).Routes(r)
+				profilehttp.New(profileSvc, authH.RequireAuth, authhttp.UserID).Audited(d.Audit).Routes(r)
 				mountAdvice(r, d, authH, profileSvc) // matching engine + WhatsApp (advice_wiring.go)
 				mountDashboard(r, d, authH)          // portfolio, dashboard, news (dashboard_wiring.go)
 				mountAdvisory(r, d, authH)           // RAG chat (advisory_wiring.go)
@@ -92,7 +102,7 @@ func newAuthService(d Deps) (*authapp.Service, error) {
 	c := d.Config.Auth
 	var mailer authdomain.Mailer = authinfra.LogMailer{}
 	if c.SMTPHost != "" {
-		mailer = authinfra.NewSMTPMailer(authinfra.SMTPConfig{Host: c.SMTPHost, Port: c.SMTPPort, User: c.SMTPUser, Password: c.SMTPPassword, From: c.MailFrom})
+		mailer = authinfra.NewSMTPMailer(authinfra.SMTPConfig{Host: c.SMTPHost, Port: c.SMTPPort, User: c.SMTPUser, Password: c.SMTPPassword, From: c.MailFrom, RequireTLS: d.Config.IsProduction()})
 	}
 	var google authdomain.GoogleVerifier
 	if c.GoogleClientID != "" {
@@ -108,7 +118,11 @@ func newAuthService(d Deps) (*authapp.Service, error) {
 
 func newProfileService(d Deps) *profileapp.Service {
 	ai := profileinfra.NewExplainer(aiclient.New(d.Config.AIServiceURL, d.Config.AIInternalKey, 15*time.Second))
-	return profileapp.NewService(profileinfra.NewRepo(d.Pool), ai, newID, time.Now)
+	repo := profileinfra.NewRepo(d.Pool, d.Keys)
+	if err := repo.Backfill(context.Background()); err != nil {
+		slog.Error("profile: encrypting existing answers failed", "err", err)
+	}
+	return profileapp.NewService(repo, ai, newID, time.Now)
 }
 
 func newID() string {

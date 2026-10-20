@@ -40,7 +40,7 @@ func mountAdvisory(r chi.Router, d Deps, authH *authhttp.Handler) {
 	}
 	svc := advapp.NewService(advapp.Deps{
 		Store:    store,
-		Contexts: contextBuilder{profiles: profileBridge{profileinfra.NewRepo(d.Pool)}, matching: matching(d), portfolio: pf},
+		Contexts: contextBuilder{profiles: profileBridge{profileinfra.NewRepo(d.Pool, d.Keys)}, matching: matching(d), portfolio: pf},
 		News:     newsBridge{svc: newsapp.NewService(newsFeed{market.repo}, newsinfra.NewRepo(d.Pool), pf)},
 		AI:       advinfra.NewAI(aiclient.New(d.Config.AIServiceURL, d.Config.AIInternalKey, aiChatTimeout)),
 		NewID:    newUUID, Now: time.Now,

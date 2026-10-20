@@ -35,7 +35,7 @@ func mountDashboard(r chi.Router, d Deps, authH *authhttp.Handler) {
 	pfhttp.New(pf, authH.RequireAuth, authhttp.UserID).Routes(r)
 	d.Export.add("portfolio", func(ctx context.Context, id string) (any, error) { return pf.List(ctx, id) })
 
-	dash := dashapp.NewService(portfolioBridge{pf}, dashinfra.NewProfileRepo(d.Pool), newRecommender(d), time.Now)
+	dash := dashapp.NewService(portfolioBridge{pf}, dashinfra.NewProfileRepo(d.Pool, d.Keys), newRecommender(d), time.Now)
 	dashhttp.New(dash, authH.RequireAuth, authhttp.UserID).Routes(r)
 
 	news := newsapp.NewService(newsFeed{market.repo}, newsinfra.NewRepo(d.Pool), pf)

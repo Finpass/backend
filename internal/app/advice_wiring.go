@@ -35,7 +35,7 @@ func matching(d Deps) *matchapp.Service {
 	matchOnce.Do(func() {
 		catalog := matchinfra.NewCatalog(d.Pool)
 		matchSvc = matchapp.NewService(matchapp.Deps{
-			Profiles: profileBridge{profileinfra.NewRepo(d.Pool)},
+			Profiles: profileBridge{profileinfra.NewRepo(d.Pool, d.Keys)},
 			Holdings: matchinfra.NewHoldings(d.Pool),
 			Catalog:  catalog,
 			Lookup:   catalog,
@@ -65,10 +65,10 @@ func mountAdvice(r chi.Router, d Deps, authH *authhttp.Handler, profiles *profil
 		Store:   repo,
 		Matcher: waMatcher{ms},
 		Sender:  wainfra.NewGoWA(c.BaseURL, c.BasicUser, c.BasicPassword, c.DeviceID),
-		Names:   nameBridge{profileinfra.NewRepo(d.Pool)},
+		Names:   nameBridge{profileinfra.NewRepo(d.Pool, d.Keys)},
 		Link:    link, Secret: c.WebhookSecret, NewID: newID, Now: time.Now,
 	})
-	wahttp.New(svc, authH.RequireAuth, authhttp.UserID).Routes(r)
+	wahttp.New(svc, authH.RequireAuth, authhttp.UserID).Audited(d.Audit).Routes(r)
 	profiles.AlsoErase(svc.Erase)
 	d.Export.add("whatsapp", func(ctx context.Context, id string) (any, error) { return svc.Settings(ctx, id) })
 

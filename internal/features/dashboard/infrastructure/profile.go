@@ -3,6 +3,7 @@ package infrastructure
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -10,11 +11,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"shenzen/backend/internal/features/dashboard/domain"
+	"shenzen/backend/internal/platform/crypto"
 )
 
-type ProfileRepo struct{ pool *pgxpool.Pool }
+type ProfileRepo struct {
+	pool *pgxpool.Pool
+	keys *crypto.Keyring // nil outside production
+}
 
-func NewProfileRepo(p *pgxpool.Pool) ProfileRepo { return ProfileRepo{p} }
+func NewProfileRepo(p *pgxpool.Pool, keys *crypto.Keyring) ProfileRepo { return ProfileRepo{p, keys} }
 
 func num(a map[string]any, k string) int64 {
 	f, _ := a[k].(float64)
@@ -31,16 +36,34 @@ func (r ProfileRepo) Read(ctx context.Context, userID string) (domain.Profile, e
 	var name string
 	var status *string
 	var answers map[string]any
-	var risk *string
+	var rawAnswers, rawOutput json.RawMessage
+	var assessmentID *string
 	err := r.pool.QueryRow(ctx, `
-		SELECT u.name, p.status, p.answers,
-		       (SELECT a.output->>'finalProfile' FROM profile_assessments a WHERE a.user_id = u.id ORDER BY a.created_at DESC LIMIT 1)
-		FROM users u LEFT JOIN profiles p ON p.user_id = u.id WHERE u.id = $1`, userID).Scan(&name, &status, &answers, &risk)
+		SELECT u.name, p.status, p.answers, a.id, a.output
+		FROM users u
+		LEFT JOIN profiles p ON p.user_id = u.id
+		LEFT JOIN LATERAL (SELECT id, output FROM profile_assessments WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) a ON TRUE
+		WHERE u.id = $1`, userID).Scan(&name, &status, &rawAnswers, &assessmentID, &rawOutput)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Profile{Status: "none"}, nil
 	}
 	if err != nil {
 		return domain.Profile{}, err
+	}
+	if err := r.keys.RevealJSON("profiles.answers", userID, rawAnswers, &answers); err != nil {
+		return domain.Profile{}, err
+	}
+	var risk *string
+	if assessmentID != nil {
+		var out struct {
+			FinalProfile string `json:"finalProfile"`
+		}
+		if err := r.keys.RevealJSON("profile_assessments.output", *assessmentID, rawOutput, &out); err != nil {
+			return domain.Profile{}, err
+		}
+		if out.FinalProfile != "" {
+			risk = &out.FinalProfile
+		}
 	}
 	p := domain.Profile{FirstName: firstName(name), Status: "none"}
 	if status != nil {

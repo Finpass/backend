@@ -2,6 +2,7 @@ package infrastructure
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -9,11 +10,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"shenzen/backend/internal/features/profile/domain"
+	"shenzen/backend/internal/platform/crypto"
 )
 
-type Repo struct{ pool *pgxpool.Pool }
+type Repo struct {
+	pool *pgxpool.Pool
+	keys *crypto.Keyring // nil outside production: answers are then stored as plain JSON
+}
 
-func NewRepo(p *pgxpool.Pool) Repo { return Repo{p} }
+func NewRepo(p *pgxpool.Pool, keys *crypto.Keyring) Repo { return Repo{p, keys} }
+
+const (
+	answersLabel = "profiles.answers"
+	inputLabel   = "profile_assessments.input"
+	traceLabel   = "profile_assessments.trace"
+	outputLabel  = "profile_assessments.output"
+)
 
 func mapErr(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -43,8 +55,12 @@ func (r Repo) SaveConsent(ctx context.Context, c domain.Consent, now time.Time) 
 
 func (r Repo) Profile(ctx context.Context, userID string) (domain.Profile, error) {
 	p := domain.Profile{UserID: userID}
+	var raw json.RawMessage
 	err := r.pool.QueryRow(ctx, `SELECT status, current_section, answers, opt_out, updated_at FROM profiles WHERE user_id = $1`, userID).
-		Scan(&p.Status, &p.CurrentSection, &p.Answers, &p.OptOut, &p.UpdatedAt)
+		Scan(&p.Status, &p.CurrentSection, &raw, &p.OptOut, &p.UpdatedAt)
+	if err == nil {
+		err = r.keys.RevealJSON(answersLabel, userID, raw, &p.Answers)
+	}
 	p.UpdatedAt = p.UpdatedAt.UTC()
 	if p.Answers == nil {
 		p.Answers = domain.Answers{}
@@ -56,11 +72,15 @@ func (r Repo) Profile(ctx context.Context, userID string) (domain.Profile, error
 }
 
 func (r Repo) SaveDraft(ctx context.Context, p domain.Profile) error {
-	_, err := r.pool.Exec(ctx,
+	answers, err := r.keys.ProtectJSON(answersLabel, p.UserID, p.Answers)
+	if err != nil {
+		return err
+	}
+	_, err = r.pool.Exec(ctx,
 		`INSERT INTO profiles (user_id, status, current_section, answers, opt_out, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $6)
 		 ON CONFLICT (user_id) DO UPDATE SET status = EXCLUDED.status, current_section = EXCLUDED.current_section,
 		   answers = EXCLUDED.answers, opt_out = EXCLUDED.opt_out, updated_at = EXCLUDED.updated_at`,
-		p.UserID, p.Status, p.CurrentSection, p.Answers, nonNil(p.OptOut), p.UpdatedAt)
+		p.UserID, p.Status, p.CurrentSection, answers, nonNil(p.OptOut), p.UpdatedAt)
 	return err
 }
 
@@ -73,11 +93,24 @@ func nonNil(s []string) []string {
 
 func (r Repo) LatestAssessment(ctx context.Context, userID string) (domain.Assessment, error) {
 	a := domain.Assessment{UserID: userID}
+	var in, trace, out json.RawMessage
 	err := r.pool.QueryRow(ctx,
 		`SELECT id, questionnaire_version, rule_version, input, trace, output, explanation, created_at
 		 FROM profile_assessments WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, userID).
-		Scan(&a.ID, &a.QuestionnaireVersion, &a.RuleVersion, &a.Input, &a.Trace, &a.Output, &a.Explanation, &a.CreatedAt)
-	return a, mapErr(err)
+		Scan(&a.ID, &a.QuestionnaireVersion, &a.RuleVersion, &in, &trace, &out, &a.Explanation, &a.CreatedAt)
+	if err != nil {
+		return a, mapErr(err)
+	}
+	for _, f := range []struct {
+		label string
+		raw   json.RawMessage
+		dst   any
+	}{{inputLabel, in, &a.Input}, {traceLabel, trace, &a.Trace}, {outputLabel, out, &a.Output}} {
+		if err := r.keys.RevealJSON(f.label, a.ID, f.raw, f.dst); err != nil {
+			return a, err
+		}
+	}
+	return a, nil
 }
 
 func (r Repo) AssessmentTimes(ctx context.Context, userID string, since time.Time) ([]time.Time, error) {
@@ -102,10 +135,22 @@ func (r Repo) SaveAssessment(ctx context.Context, a domain.Assessment) error {
 	if tag.RowsAffected() == 0 {
 		return domain.ErrSubmitted
 	}
+	in, err := r.keys.ProtectJSON(inputLabel, a.ID, a.Input)
+	if err != nil {
+		return err
+	}
+	trace, err := r.keys.ProtectJSON(traceLabel, a.ID, a.Trace)
+	if err != nil {
+		return err
+	}
+	out, err := r.keys.ProtectJSON(outputLabel, a.ID, a.Output)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO profile_assessments (id, user_id, questionnaire_version, rule_version, input, trace, output, explanation, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		a.ID, a.UserID, a.QuestionnaireVersion, a.RuleVersion, a.Input, a.Trace, a.Output, a.Explanation, a.CreatedAt); err != nil {
+		a.ID, a.UserID, a.QuestionnaireVersion, a.RuleVersion, in, trace, out, a.Explanation, a.CreatedAt); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -130,4 +175,47 @@ func (r Repo) Delete(ctx context.Context, userID string) error {
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// Backfill seals answers saved before encryption was switched on. Assessments are append-only (a trigger blocks
+// UPDATE), so older ones stay as written and are still read.
+func (r Repo) Backfill(ctx context.Context) error {
+	if r.keys == nil {
+		return nil
+	}
+	rows, err := r.pool.Query(ctx, `SELECT user_id, answers FROM profiles WHERE jsonb_typeof(answers) = 'object'`)
+	if err != nil {
+		return err
+	}
+	type row struct {
+		id  string
+		raw json.RawMessage
+	}
+	var todo []row
+	for rows.Next() {
+		var x row
+		if err := rows.Scan(&x.id, &x.raw); err != nil {
+			rows.Close()
+			return err
+		}
+		todo = append(todo, x)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, x := range todo {
+		var v map[string]any
+		if err := json.Unmarshal(x.raw, &v); err != nil {
+			return err
+		}
+		sealed, err := r.keys.ProtectJSON(answersLabel, x.id, v)
+		if err != nil {
+			return err
+		}
+		if _, err := r.pool.Exec(ctx, `UPDATE profiles SET answers = $2 WHERE user_id = $1`, x.id, sealed); err != nil {
+			return err
+		}
+	}
+	return nil
 }
