@@ -320,7 +320,7 @@ createdb finpass_test && DATABASE_URL=postgres://localhost/finpass_test?sslmode=
 SEC_TEST_DATABASE_URL=postgres://localhost/finpass_test?sslmode=disable make test
 ```
 
-Use a throwaway database: those tests insert and delete rows. CI runs `make lint` and `make test` on every pull request.
+Use a throwaway database: those tests insert and delete rows. Run the whole suite with `go test -p 1 ./...` against a database, because several packages write to the same tables and would race each other. `internal/app/security_edge_test.go` holds 30 hostile-input cases (SQL injection, forged tokens, IDOR, brute force, CORS, body abuse, error leakage); see the [edge case report](https://github.com/Finpass/documentation/blob/main/security-edge-case-report.md). CI runs `make lint` and `make test` on every pull request.
 
 ## Deployment (Railway, or any Docker host)
 
