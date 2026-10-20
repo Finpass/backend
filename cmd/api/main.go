@@ -15,6 +15,7 @@ import (
 	"shenzen/backend/internal/app"
 	"shenzen/backend/internal/platform/config"
 	"shenzen/backend/internal/platform/database"
+	"shenzen/backend/internal/platform/errorreport"
 	"shenzen/backend/internal/platform/logger"
 )
 
@@ -31,6 +32,7 @@ func run() error {
 		return err
 	}
 	slog.SetDefault(logger.New(cfg.Env, cfg.LogLevel))
+	defer errorreport.Init(cfg.SentryDSN, cfg.Env, "")()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

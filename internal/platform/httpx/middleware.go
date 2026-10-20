@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -44,7 +45,7 @@ func Recover(next http.Handler) http.Handler {
 		defer func() {
 			if rec := recover(); rec != nil {
 				slog.ErrorContext(r.Context(), "panic", "panic", rec, "stack", string(debug.Stack()), "requestId", RequestID(r.Context()))
-				WriteError(w, r, apperr.New(apperr.Internal, "Internal server error"))
+				WriteError(w, r, apperr.Wrap(apperr.Internal, "Internal server error", fmt.Errorf("panic: %v", rec)))
 			}
 		}()
 		next.ServeHTTP(w, r)

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"shenzen/backend/internal/platform/errorreport"
 	"shenzen/backend/internal/shared/apperr"
 )
 
@@ -63,6 +64,7 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	message, details := ae.Message, ae.Details
 	if status >= 500 {
 		slog.ErrorContext(r.Context(), "request failed", "code", ae.Code, "err", ae, "requestId", RequestID(r.Context()))
+		errorreport.Capture(ae, string(ae.Code), RequestID(r.Context()))
 		if ae.Code == apperr.Internal {
 			message = "Internal server error"
 		}

@@ -20,6 +20,7 @@ type Config struct {
 	InternalAPIKey  string
 	AIInternalKey   string // sent to the AI service as X-Internal-Api-Key
 	ShutdownTimeout time.Duration
+	SentryDSN       string // empty turns error reporting off
 	Retention       Retention
 	ProxyHops       int // reverse proxies in front of the API that append to X-Forwarded-For (0 = none)
 	Auth            AuthConfig
@@ -81,6 +82,7 @@ func Load() (Config, error) {
 		InternalAPIKey:  os.Getenv("INTERNAL_API_KEY"),
 		AIInternalKey:   get("AI_INTERNAL_API_KEY", os.Getenv("INTERNAL_API_KEY")),
 		ShutdownTimeout: 15 * time.Second,
+		SentryDSN:       os.Getenv("SENTRY_DSN"),
 		Data:            DataConfig{KEKID: get("DATA_KEK_ID", "k1"), KEK: os.Getenv("DATA_KEK"), IndexKey: os.Getenv("DATA_INDEX_KEY"), OldKEKs: os.Getenv("DATA_KEK_OLD")},
 		WA: WAConfig{
 			BaseURL:       get("GOWA_BASE_URL", "http://localhost:3000"),
