@@ -291,6 +291,23 @@ func TestGoogleLoginCreatesAndLinks(t *testing.T) {
 	}
 }
 
+func TestGoogleLinkDropsPasswordSetBeforeEmailWasVerified(t *testing.T) {
+	ctx, now := context.Background(), time.Now()
+	g := fakeGoogle{domain.GoogleProfile{Sub: "g2", Email: "vic@example.com", Name: "Vic", EmailVerified: true}}
+	svc, _ := newService(t, &now, g)
+	// an attacker registers the victim's address with a password of their own and never gets the code
+	if _, err := svc.Register(ctx, application.RegisterCommand{Name: "X", Email: "vic@example.com", Password: "attacker123"}); err != nil {
+		t.Fatal(err)
+	}
+	// the real owner signs in with Google, which links and verifies the account
+	if _, err := svc.LoginWithGoogle(ctx, application.GoogleCommand{AccessToken: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Login(ctx, application.LoginCommand{Email: "vic@example.com", Password: "attacker123"}); !errors.Is(err, domain.ErrInvalidLogin) {
+		t.Fatalf("the attacker's password must stop working after the Google link, got %v", err)
+	}
+}
+
 func TestDeleteAccountNeedsThePassword(t *testing.T) {
 	ctx, now := context.Background(), time.Now()
 	svc, mail := newService(t, &now, nil)

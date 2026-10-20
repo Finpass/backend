@@ -73,7 +73,15 @@ func (s *Service) resolveGoogleUser(ctx context.Context, p domain.GoogleProfile)
 	u, err = s.users.FindByEmail(ctx, email)
 	switch {
 	case err == nil:
-		// Google asserts the email, so linking is safe and also verifies it
+		// Google asserts the email, so linking is safe and also verifies it. A password set while the email was still
+		// unverified may belong to whoever registered first, not to the mailbox owner: drop it so only Google (or a
+		// reset through the mailbox) can open the account.
+		if !u.EmailVerified && u.HasPassword() {
+			if err := s.users.SetPassword(ctx, u.ID, ""); err != nil {
+				return domain.User{}, err
+			}
+			u.PasswordHash = ""
+		}
 		if err := s.users.LinkGoogle(ctx, u.ID, p.Sub); err != nil {
 			return domain.User{}, err
 		}
