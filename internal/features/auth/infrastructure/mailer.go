@@ -3,17 +3,23 @@ package infrastructure
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
+	"net"
 	"net/smtp"
 	"strings"
+	"time"
 
 	"shenzen/backend/internal/features/auth/domain"
 )
 
 type SMTPConfig struct {
 	Host, Port, User, Password, From string
+	// RequireTLS refuses to send unless the connection is encrypted: implicit TLS on port 465, otherwise STARTTLS.
+	RequireTLS bool
 }
 
 type SMTPMailer struct{ cfg SMTPConfig }
@@ -68,7 +74,64 @@ func (m SMTPMailer) SendOTP(_ context.Context, to, name string, p domain.Purpose
 	if m.cfg.User != "" {
 		auth = smtp.PlainAuth("", m.cfg.User, m.cfg.Password, m.cfg.Host)
 	}
-	return smtp.SendMail(m.cfg.Host+":"+m.cfg.Port, auth, m.cfg.From, []string{to}, []byte(msg))
+	return m.send(auth, to, []byte(msg))
+}
+
+// send is smtp.SendMail with one difference: when RequireTLS is set it fails instead of continuing in plain text
+// if the server does not offer STARTTLS.
+func (m SMTPMailer) send(auth smtp.Auth, to string, msg []byte) error {
+	addr := net.JoinHostPort(m.cfg.Host, m.cfg.Port)
+	tlsCfg := &tls.Config{ServerName: m.cfg.Host, MinVersion: tls.VersionTLS12}
+	d := &net.Dialer{Timeout: 15 * time.Second}
+	implicit := m.cfg.Port == "465"
+	var conn net.Conn
+	var err error
+	if implicit {
+		conn, err = tls.DialWithDialer(d, "tcp", addr, tlsCfg)
+	} else {
+		conn, err = d.Dial("tcp", addr)
+	}
+	if err != nil {
+		return err
+	}
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	c, err := smtp.NewClient(conn, m.cfg.Host)
+	if err != nil {
+		_ = conn.Close()
+		return err
+	}
+	defer c.Close()
+	if !implicit {
+		if ok, _ := c.Extension("STARTTLS"); ok {
+			if err := c.StartTLS(tlsCfg); err != nil {
+				return err
+			}
+		} else if m.cfg.RequireTLS {
+			return errors.New("smtp: server does not offer STARTTLS and TLS is required")
+		}
+	}
+	if auth != nil {
+		if err := c.Auth(auth); err != nil {
+			return err
+		}
+	}
+	if err := c.Mail(m.cfg.From); err != nil {
+		return err
+	}
+	if err := c.Rcpt(to); err != nil {
+		return err
+	}
+	w, err := c.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(msg); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return c.Quit()
 }
 
 func sanitizeHeader(s string) string {
