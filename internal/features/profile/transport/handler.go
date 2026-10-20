@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"shenzen/backend/internal/features/profile/application"
+	"shenzen/backend/internal/platform/audit"
 	"shenzen/backend/internal/platform/httpx"
 )
 
@@ -15,7 +16,11 @@ type Handler struct {
 	svc    *application.Service
 	auth   func(http.Handler) http.Handler
 	userID func(context.Context) string
+	audit  *audit.Recorder // nil records nothing
 }
+
+// Audited makes the handler record consent changes in the security trail.
+func (h *Handler) Audited(r *audit.Recorder) *Handler { h.audit = r; return h }
 
 // auth and userID come from the auth slice via the composition root, so slices never import each other.
 func New(svc *application.Service, auth func(http.Handler) http.Handler, userID func(context.Context) string) *Handler {
@@ -80,6 +85,7 @@ func (h *Handler) consent(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	h.audit.Record(r.Context(), audit.Event{Actor: h.userID(r.Context()), Action: "profile.consent", Meta: map[string]any{"whatsappOptIn": req.WhatsappOptIn}})
 	httpx.OK(w, http.StatusOK, "Consent recorded", c)
 	return nil
 }
