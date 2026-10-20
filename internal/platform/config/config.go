@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -19,9 +20,16 @@ type Config struct {
 	InternalAPIKey  string
 	AIInternalKey   string // sent to the AI service as X-Internal-Api-Key
 	ShutdownTimeout time.Duration
+	Retention       Retention
+	ProxyHops       int // reverse proxies in front of the API that append to X-Forwarded-For (0 = none)
 	Auth            AuthConfig
 	WA              WAConfig
 	Data            DataConfig
+}
+
+// Retention is how many days each kind of data is kept before the daily purge removes it; 0 keeps it forever.
+type Retention struct {
+	ChatDays, WhatsAppMessageDays, EventDays int
 }
 
 // DataConfig holds the keys that encrypt sensitive columns (base64, 32 bytes each: openssl rand -base64 32).
@@ -64,7 +72,7 @@ func (c Config) IsProduction() bool { return c.Env == "production" }
 
 func Load() (Config, error) {
 	c := Config{
-		Env:             get("APP_ENV", "development"),
+		Env:             os.Getenv("APP_ENV"),
 		Port:            get("PORT", "8080"),
 		LogLevel:        get("LOG_LEVEL", "info"),
 		DatabaseURL:     os.Getenv("DATABASE_URL"),
@@ -105,6 +113,25 @@ func Load() (Config, error) {
 		c.ShutdownTimeout = time.Duration(n) * time.Second
 	}
 
+	if v := os.Getenv("TRUSTED_PROXY_HOPS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 || n > 5 {
+			return Config{}, fmt.Errorf("TRUSTED_PROXY_HOPS must be 0 to 5, got %q", v)
+		}
+		c.ProxyHops = n
+	}
+
+	c.Retention = Retention{ChatDays: 365, WhatsAppMessageDays: 90, EventDays: 180}
+	for env, dst := range map[string]*int{"RETENTION_CHAT_DAYS": &c.Retention.ChatDays, "RETENTION_WHATSAPP_MESSAGE_DAYS": &c.Retention.WhatsAppMessageDays, "RETENTION_EVENT_DAYS": &c.Retention.EventDays} {
+		if v := os.Getenv(env); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 {
+				return Config{}, fmt.Errorf("%s must be 0 (keep forever) or a positive number of days, got %q", env, v)
+			}
+			*dst = n
+		}
+	}
+
 	var err error
 	if c.Auth.AccessTTL, err = duration("ACCESS_TOKEN_TTL_MINUTES", c.Auth.AccessTTL, time.Minute); err != nil {
 		return Config{}, err
@@ -120,7 +147,21 @@ func Load() (Config, error) {
 
 func (c Config) validate() error {
 	var errs []error
+	switch c.Env {
+	case "development", "test", "production":
+	default:
+		// an unset value used to mean development, which silently skipped every production check
+		errs = append(errs, fmt.Errorf("APP_ENV must be development, test or production, got %q", c.Env))
+	}
 	if c.IsProduction() {
+		if strings.Contains(c.DatabaseURL, "sslmode=disable") {
+			errs = append(errs, errors.New("DATABASE_URL must not set sslmode=disable in production"))
+		}
+		for _, o := range c.CORSOrigins {
+			if strings.Contains(o, "localhost") || strings.Contains(o, "127.0.0.1") {
+				slog.Warn("CORS_ORIGINS lists a local origin in production", "origin", o)
+			}
+		}
 		if c.DatabaseURL == "" {
 			errs = append(errs, errors.New("DATABASE_URL is required in production"))
 		}
