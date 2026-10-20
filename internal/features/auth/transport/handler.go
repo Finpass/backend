@@ -66,9 +66,9 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Method(http.MethodPost, "/google", httpx.HandlerFunc(h.google))
 			r.Method(http.MethodPost, "/forgot-password", httpx.HandlerFunc(h.forgotPassword))
 			r.Method(http.MethodPost, "/reset-password", httpx.HandlerFunc(h.resetPassword))
+			r.Method(http.MethodPost, "/refresh", httpx.HandlerFunc(h.refresh))
+			r.Method(http.MethodPost, "/logout", httpx.HandlerFunc(h.logout))
 		})
-		r.Method(http.MethodPost, "/refresh", httpx.HandlerFunc(h.refresh))
-		r.Method(http.MethodPost, "/logout", httpx.HandlerFunc(h.logout))
 		r.With(h.RequireAuth).Method(http.MethodGet, "/me", httpx.HandlerFunc(h.me))
 		r.With(h.RequireAuth).Method(http.MethodGet, "/export", httpx.HandlerFunc(h.export))
 		r.With(h.RequireAuth).Method(http.MethodDelete, "/account", httpx.HandlerFunc(h.deleteAccount))
@@ -89,6 +89,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	h.audit.Record(r.Context(), audit.Event{Action: "auth.register"})
 	httpx.OK(w, http.StatusCreated, "Verification code sent", pendingResponse{Email: email})
 	return nil
 }
@@ -102,6 +103,7 @@ func (h *Handler) verifyEmail(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	h.audit.Record(r.Context(), audit.Event{Actor: res.User.ID, Action: "auth.email.verified"})
 	h.startSession(w, res, http.StatusOK, "Email verified")
 	return nil
 }
@@ -151,6 +153,7 @@ func (h *Handler) google(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	h.audit.Record(r.Context(), audit.Event{Actor: res.User.ID, Action: "auth.login.ok", Meta: map[string]any{"via": "google"}})
 	h.startSession(w, res, http.StatusOK, "Signed in with Google")
 	return nil
 }
@@ -178,6 +181,7 @@ func (h *Handler) resetPassword(w http.ResponseWriter, r *http.Request) error {
 	if err := h.svc.ResetPassword(r.Context(), application.ResetCommand{Email: req.Email, Code: req.Code, NewPassword: req.NewPassword}); err != nil {
 		return err
 	}
+	h.audit.Record(r.Context(), audit.Event{Action: "auth.password.reset"})
 	httpx.OK(w, http.StatusOK, "Password updated", nil)
 	return nil
 }
@@ -203,6 +207,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	h.clearRefreshCookie(w)
+	h.audit.Record(r.Context(), audit.Event{Action: "auth.logout"})
 	httpx.OK(w, http.StatusOK, "Signed out", nil)
 	return nil
 }
