@@ -1,5 +1,15 @@
 # backend (Go)
 
+Part of **Finpass**, a wealth advisory agent built for FinTechathon Shenzhen (Topic 3). Three repositories:
+
+| Repository | What it is |
+|------------|------------|
+| [Finpass/frontend](https://github.com/Finpass/frontend) | Next.js web app: sign-in, profiling questionnaire, dashboard, advisor chat |
+| [Finpass/backend](https://github.com/Finpass/backend) | Go API: auth, profile rule engine, portfolio, market data, WhatsApp daily brief |
+| [Finpass/ai](https://github.com/Finpass/ai) | Python service: RAG advisor chat and profile wording (only the backend calls it) |
+
+This is the **backend** repository. It is the only service that talks to the database and to the AI service.
+
 Go 1.27, chi, pgx/v5, goose (migrations), sqlc (queries), slog.
 
 ## Run
@@ -35,7 +45,7 @@ Rules:
 - Invariants live in the domain constructor (`domain.New`), request-shape checks in DTO `validate` tags.
 - `internal/features/note` is a working template (in-memory repo). Copy it for a new slice, then delete it when the first real slice lands.
 
-Contract: [docs/error-contract.md](docs/error-contract.md).
+Contract: [Response and error contract](#response-and-error-contract) at the end of this file.
 
 ## Adding a Postgres-backed slice
 
@@ -294,3 +304,101 @@ WA_DAILY_ENABLED=true
 ```
 
 If the API runs on another host or in Docker, the webhook URL must be reachable from GoWA (for Docker use `http://host.docker.internal:8080/api/v1/whatsapp/webhook`). The client uses `POST /send/message` with `{"phone":"<digits>@s.whatsapp.net","message":...}` and `GET /app/status` (`is_logged_in`). Tests: `go test ./internal/features/matching/... ./internal/features/whatsapp/...` (the GoWA client runs against an `httptest` server that mimics its API).
+
+## Tests
+
+```
+make test    # go test -race -count=1 ./...
+make check   # fmt + lint + test
+```
+
+Most tests need nothing: they use fakes and `httptest` servers. Tests that need PostgreSQL (field encryption, the
+append-only audit trail, retention, audit events) skip themselves unless a migrated database is given:
+
+```
+createdb finpass_test && DATABASE_URL=postgres://localhost/finpass_test?sslmode=disable make migrate-up
+SEC_TEST_DATABASE_URL=postgres://localhost/finpass_test?sslmode=disable make test
+```
+
+Use a throwaway database: those tests insert and delete rows. CI runs `make lint` and `make test` on every pull request.
+
+## Deployment (Railway, or any Docker host)
+
+`Dockerfile` has two targets: the API (distroless, non-root, `PORT` default 8080) and `migrate` (goose + the SQL in
+`db/migrations`). `railway.json` / `railway.migrate.json` hold the Railway settings; the health check is `/readyz`.
+
+1. Create a PostgreSQL database (the schema uses the `pgvector` and `pg_trgm` extensions; the `pgvector/pgvector` image has both).
+2. Run the migrations once per release: `docker build --target migrate -t finpass-migrate . && docker run --rm finpass-migrate "$DATABASE_URL" up`
+   (or `make migrate-up`). Optional: `make import-market` and `make classify-assets` load the market data set.
+3. Deploy the API image with the variables below. `APP_ENV` is required; in `production` the API refuses dev
+   secrets, `sslmode=disable` and missing SMTP, so a half-configured deploy fails at start instead of running unsafe.
+4. Deploy the AI service ([Finpass/ai](https://github.com/Finpass/ai)) and set `AI_SERVICE_URL` to it; `AI_INTERNAL_API_KEY` must equal the AI service's `INTERNAL_API_KEY`.
+5. Set `CORS_ORIGINS` and `PUBLIC_APP_URL` to the frontend's public URL.
+6. If the API sits behind proxies, set `TRUSTED_PROXY_HOPS` to the real number of them (default 0, which ignores `X-Forwarded-For`).
+
+| Variable | Purpose |
+|----------|---------|
+| `APP_ENV=production`, `PORT`, `LOG_LEVEL` | runtime mode |
+| `DATABASE_URL` | PostgreSQL, with `sslmode=require` or stronger in production |
+| `JWT_SECRET` | 32+ random characters |
+| `INTERNAL_API_KEY`, `AI_INTERNAL_API_KEY`, `AI_SERVICE_URL` | link to the AI service |
+| `GOOGLE_CLIENT_ID`, `CORS_ORIGINS`, `PUBLIC_APP_URL` | sign-in and browser access |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM` | verification and reset emails |
+| `GOWA_*`, `WA_DAILY_ENABLED` | WhatsApp daily brief (needs a running GoWA gateway); off by default |
+
+The full list with defaults is in `.env.example`. Local full-stack run: start Postgres, `make migrate-up`, `make run`
+here, `make run` in the AI repo, `npm run dev` in the frontend.
+
+## Response and error contract
+
+One envelope for all three repos (backend, ai, frontend). This section is the contract; the backend owns it.
+
+### Success
+
+```json
+{ "success": true, "message": "Note created", "data": { } }
+```
+
+### Failure
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "message": "Validation failed",
+    "details": [{ "field": "title", "message": "required" }]
+  },
+  "requestId": "a79fb5faae5869f3"
+}
+```
+
+`details` is always an array. `requestId` mirrors the `X-Request-Id` response header.
+
+### Codes
+
+| Code | HTTP | Use |
+|------|------|-----|
+| BAD_REQUEST | 400 | malformed JSON, unknown field |
+| UNAUTHORIZED | 401 | missing/invalid credentials |
+| FORBIDDEN | 403 | authenticated but not allowed |
+| NOT_FOUND | 404 | unknown resource or route |
+| METHOD_NOT_ALLOWED | 405 | |
+| CONFLICT | 409 | duplicate, stale state |
+| VALIDATION_FAILED | 422 | field-level input errors (`details`) |
+| UNPROCESSABLE | 422 | input is well-formed but a business rule rejects it |
+| TOO_MANY_REQUESTS | 429 | |
+| INTERNAL | 500 | unexpected; message is always generic, cause only in logs |
+| UPSTREAM_FAILED | 502 | a service we call failed |
+| UNAVAILABLE | 503 | dependency down (readiness) |
+| UPSTREAM_TIMEOUT | 504 | a service we call timed out |
+
+A code is added in all three repos in the same change: `backend/internal/shared/apperr`, `backend/internal/platform/httpx/response.go`, `ai/src/core/errors.py`, `frontend/src/types/api.ts`.
+
+### Where errors are raised and mapped
+
+- domain/application code returns `apperr.Error` (Go) or raises `AppError` (Python). It never knows about HTTP.
+- exactly one place per service maps code to status and writes the envelope: `httpx.WriteError` (Go), `core/error_handler.py` (Python).
+- 5xx: logged with cause and request id; the client sees a generic message.
+- service to service: backend calls ai through `platform/aiclient`. Client faults (4xx) keep their code; ai 5xx/network/timeout become UPSTREAM_FAILED / UPSTREAM_TIMEOUT. `X-Request-Id` and `X-Internal-Api-Key` are forwarded.
+- frontend: `lib/http.ts` turns every failure into one `ApiError`; `userMessage` hides 5xx detail and shows the request id.
