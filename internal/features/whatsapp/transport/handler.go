@@ -4,11 +4,14 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"shenzen/backend/internal/features/whatsapp/application"
+	"shenzen/backend/internal/platform/audit"
 	"shenzen/backend/internal/platform/httpx"
 	"shenzen/backend/internal/shared/apperr"
 )
@@ -17,10 +20,24 @@ type Handler struct {
 	svc    *application.Service
 	auth   func(http.Handler) http.Handler
 	userID func(context.Context) string
+	// per-user caps on messages that reach a phone, whichever number is saved: a code or test text costs us sender reputation
+	codes, tests *httpx.Limiter
+	audit        *audit.Recorder // nil records nothing
 }
 
+// Audited makes the handler record opt-in changes and number verification in the security trail.
+func (h *Handler) Audited(r *audit.Recorder) *Handler { h.audit = r; return h }
+
 func New(svc *application.Service, auth func(http.Handler) http.Handler, userID func(context.Context) string) *Handler {
-	return &Handler{svc, auth, userID}
+	return &Handler{svc: svc, auth: auth, userID: userID, codes: httpx.NewLimiter(5, time.Hour), tests: httpx.NewLimiter(5, time.Hour)}
+}
+
+func capped(w http.ResponseWriter, l *httpx.Limiter, key string) error {
+	if ok, retry := l.Take(key); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(retry))
+		return apperr.New(apperr.TooManyRequests, "Too many messages, try again later")
+	}
+	return nil
 }
 
 func (h *Handler) Routes(r chi.Router) {
@@ -86,11 +103,15 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	h.audit.Record(r.Context(), audit.Event{Actor: h.userID(r.Context()), Action: "whatsapp.settings.changed", Meta: map[string]any{"optIn": req.OptIn, "frequency": req.Frequency}})
 	httpx.OK(w, http.StatusOK, "WhatsApp settings saved", s)
 	return nil
 }
 
 func (h *Handler) verifyStart(w http.ResponseWriter, r *http.Request) error {
+	if err := capped(w, h.codes, h.userID(r.Context())); err != nil {
+		return err
+	}
 	if err := h.svc.VerifyStart(r.Context(), h.userID(r.Context())); err != nil {
 		return err
 	}
@@ -111,6 +132,7 @@ func (h *Handler) verifyConfirm(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	h.audit.Record(r.Context(), audit.Event{Actor: h.userID(r.Context()), Action: "whatsapp.number.verified"})
 	httpx.OK(w, http.StatusOK, "WhatsApp number verified", s)
 	return nil
 }
@@ -125,6 +147,9 @@ func (h *Handler) preview(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *Handler) sendTest(w http.ResponseWriter, r *http.Request) error {
+	if err := capped(w, h.tests, h.userID(r.Context())); err != nil {
+		return err
+	}
 	p, err := h.svc.SendTest(r.Context(), h.userID(r.Context()), locale(r))
 	if err != nil {
 		return err

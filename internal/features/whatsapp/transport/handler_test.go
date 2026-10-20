@@ -81,3 +81,25 @@ func TestLocale(t *testing.T) {
 		t.Error("accept-language")
 	}
 }
+
+func TestCodesAndTestsAreCappedPerUser(t *testing.T) {
+	svc := application.NewService(application.Deps{Store: store{}, Secret: "sec", Now: time.Now})
+	pass := func(next http.Handler) http.Handler { return next }
+	r := chi.NewRouter()
+	r.Use(httpx.Recover) // the stub service has no dependencies: the point here is only the cap
+	New(svc, pass, func(context.Context) string { return "u" }).Routes(r)
+	for _, path := range []string{"/whatsapp/verify/start", "/briefing/send-test"} {
+		var last int
+		for i := 0; i < 6; i++ {
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}")))
+			last = w.Code
+			if i < 5 && last == http.StatusTooManyRequests {
+				t.Fatalf("%s: capped too early at request %d", path, i+1)
+			}
+		}
+		if last != http.StatusTooManyRequests {
+			t.Errorf("%s: the sixth request got %d, want 429", path, last)
+		}
+	}
+}
