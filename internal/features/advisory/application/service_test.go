@@ -264,3 +264,21 @@ func TestContextHasNoNews(t *testing.T) {
 		t.Fatalf("%+v %v", uc, err)
 	}
 }
+
+func TestDailyCapStopsASlowSpender(t *testing.T) {
+	svc, _, now := setup(ctxs{}, &ai{})
+	ask := func() error { _, err := svc.Chat(context.Background(), "u1", "", "hi", "id", ""); return err }
+	for i := 0; i < 200; i++ {
+		if err := ask(); err != nil {
+			t.Fatal(i, err)
+		}
+		*now = now.Add(10 * time.Second) // well under the per-minute limit
+	}
+	if err := ask(); code(err) != apperr.TooManyRequests {
+		t.Fatalf("201st in a day: %v", err)
+	}
+	*now = now.Add(25 * time.Hour)
+	if err := ask(); err != nil {
+		t.Fatalf("next day: %v", err)
+	}
+}

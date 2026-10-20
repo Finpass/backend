@@ -16,7 +16,8 @@ import (
 const (
 	rateLimit  = 20
 	rateWindow = time.Minute
-	newsLimit  = 5 // articles offered to the advisor per question
+	dayLimit   = 200 // chat messages per user per day
+	newsLimit  = 5   // articles offered to the advisor per question
 )
 
 type Deps struct {
@@ -33,6 +34,7 @@ type Service struct {
 	mu sync.Mutex
 	// shortcut: per-instance fixed window kept in memory, move to a shared limiter when the API scales out.
 	seen map[string]*window
+	day  map[string]*window
 }
 
 type window struct {
@@ -40,7 +42,9 @@ type window struct {
 	resetAt time.Time
 }
 
-func NewService(d Deps) *Service { return &Service{d: d, seen: map[string]*window{}} }
+func NewService(d Deps) *Service {
+	return &Service{d: d, seen: map[string]*window{}, day: map[string]*window{}}
+}
 
 type Reply struct {
 	SessionID string         `json:"sessionId"`
@@ -48,24 +52,29 @@ type Reply struct {
 	Grounded  bool           `json:"grounded"`
 }
 
-func (s *Service) allow(userID string) bool {
+func (s *Service) allow(userID string) bool { return s.take(s.seen, userID, rateLimit, rateWindow) }
+
+// allowDay caps what one account can spend on model calls in a day, however slowly it asks.
+func (s *Service) allowDay(userID string) bool { return s.take(s.day, userID, dayLimit, 24*time.Hour) }
+
+func (s *Service) take(m map[string]*window, userID string, limit int, span time.Duration) bool {
 	now := s.d.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.seen) > 10_000 {
-		for k, w := range s.seen {
+	if len(m) > 10_000 {
+		for k, w := range m {
 			if now.After(w.resetAt) {
-				delete(s.seen, k)
+				delete(m, k)
 			}
 		}
 	}
-	w := s.seen[userID]
+	w := m[userID]
 	if w == nil || now.After(w.resetAt) {
-		w = &window{resetAt: now.Add(rateWindow)}
-		s.seen[userID] = w
+		w = &window{resetAt: now.Add(span)}
+		m[userID] = w
 	}
 	w.n++
-	return w.n <= rateLimit
+	return w.n <= limit
 }
 
 // runKey namespaces a client run id by user, so one user can never poll another's progress.
@@ -107,6 +116,9 @@ func (s *Service) ChatAbout(ctx context.Context, userID, sessionID, message, lan
 	}
 	if !s.allow(userID) {
 		return Reply{}, apperr.New(apperr.TooManyRequests, "Too many messages, try again in a minute")
+	}
+	if !s.allowDay(userID) {
+		return Reply{}, apperr.New(apperr.TooManyRequests, "Daily message limit reached, try again tomorrow")
 	}
 	uc, err := s.d.Contexts.Build(ctx, userID, compare) // before any write: no profile must not leave an empty session behind
 	if err != nil {
