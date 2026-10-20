@@ -344,6 +344,7 @@ Use a throwaway database: those tests insert and delete rows. CI runs `make lint
 | `INTERNAL_API_KEY`, `AI_INTERNAL_API_KEY`, `AI_SERVICE_URL` | link to the AI service |
 | `GOOGLE_CLIENT_ID`, `CORS_ORIGINS`, `PUBLIC_APP_URL` | sign-in and browser access |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM` | verification and reset emails |
+| `SENTRY_DSN` | optional error reporting to Sentry; empty turns it off. Only the error, stack, status code and request id are sent, never the request, user or body |
 | `GOWA_*`, `WA_DAILY_ENABLED` | WhatsApp daily brief (needs a running GoWA gateway); off by default |
 
 The full list with defaults is in `.env.example`. Local full-stack run: start Postgres, `make migrate-up`, `make run`
