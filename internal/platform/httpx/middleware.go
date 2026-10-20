@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"runtime/debug"
 	"slices"
 	"time"
@@ -17,6 +18,8 @@ import (
 type ctxKey struct{}
 
 const RequestIDHeader = "X-Request-Id"
+
+var safeRequestID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 func RequestID(ctx context.Context) string {
 	id, _ := ctx.Value(ctxKey{}).(string)
@@ -30,7 +33,8 @@ func WithRequestID(ctx context.Context, id string) context.Context {
 func RequestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get(RequestIDHeader)
-		if id == "" || len(id) > 64 {
+		// only a plain token is echoed and logged; anything else would be log or header injection
+		if !safeRequestID.MatchString(id) {
 			b := make([]byte, 8)
 			_, _ = rand.Read(b)
 			id = hex.EncodeToString(b)

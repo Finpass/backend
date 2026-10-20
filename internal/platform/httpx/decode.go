@@ -1,8 +1,10 @@
 package httpx
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"reflect"
 	"strings"
@@ -25,7 +27,15 @@ var validate = func() *validator.Validate {
 
 func Decode[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 	var dst T
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	if err != nil {
+		return dst, apperr.Wrap(apperr.BadRequest, "Invalid JSON body", err)
+	}
+	// PostgreSQL cannot store a NUL character in text, so one escaped inside a JSON string would end in a 500
+	if bytes.Contains(raw, []byte(`\u0000`)) {
+		return dst, apperr.New(apperr.BadRequest, "Invalid characters in request body")
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&dst); err != nil {
 		return dst, apperr.Wrap(apperr.BadRequest, "Invalid JSON body", err)
